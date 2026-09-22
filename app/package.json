@@ -13,10 +13,10 @@
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
-    "start": "nest start",
-    "start:dev": "nest start --watch",
-    "start:debug": "nest start --debug --watch",
-    "start:prod": "node dist/main",
+    "start": "nest start --env-file .env",
+    "start:dev": "nest start --watch --env-file .env",
+    "start:debug": "nest start --debug --watch --env-file .env",
+    "start:prod": "node --env-file-if-exists=.env dist/main",
     "lint": "oxlint --type-aware --deny-warnings src/ test/",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -34,7 +34,8 @@
     "node-pg-migrate": "^9.0.0",
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@nestjs/cli": "^12.0.0",

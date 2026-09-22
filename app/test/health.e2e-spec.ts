@@ -3,6 +3,14 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module.js';
+import { PG_POOL } from './../src/database/database.module.js';
+
+const poolThatMustNotBeUsed = {
+  query: () => {
+    throw new Error('the health check must not depend on the database');
+  },
+  end: () => Promise.resolve(),
+};
 
 describe('Health (e2e)', () => {
   let app: INestApplication<App>;
@@ -10,13 +18,16 @@ describe('Health (e2e)', () => {
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(PG_POOL)
+      .useValue(poolThatMustNotBeUsed)
+      .compile();
 
     app = moduleFixture.createNestApplication();
     await app.init();
   });
 
-  it('GET /health returns 200 with ok status', () => {
+  it('GET /health returns 200 without using the database', () => {
     return request(app.getHttpServer())
       .get('/health')
       .expect(200)
