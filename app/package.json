@@ -18,6 +18,7 @@
     "start:debug": "nest start --debug --watch --env-file .env",
     "start:prod": "node --env-file-if-exists=.env dist/main",
     "lint": "oxlint --type-aware --deny-warnings src/ test/",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
