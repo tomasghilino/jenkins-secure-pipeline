@@ -4,13 +4,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module.js';
 import { PG_POOL } from './../src/database/database.module.js';
-
-const poolThatMustNotBeUsed = {
-  query: () => {
-    throw new Error('the health check must not depend on the database');
-  },
-  end: () => Promise.resolve(),
-};
+import { poolThatMustNotBeUsed } from './unused-pool.js';
 
 describe('Health (e2e)', () => {
   let app: INestApplication<App>;
