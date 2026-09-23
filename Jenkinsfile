@@ -1,3 +1,5 @@
+def nodeImage = 'node:24.21.0-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe'
+
 pipeline {
   agent { label 'docker' }
 
@@ -27,7 +29,7 @@ pipeline {
     stage('Node') {
       agent {
         docker {
-          image 'node:24.21.0-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe'
+          image nodeImage
           reuseNode true
         }
       }
@@ -63,6 +65,22 @@ pipeline {
               sh 'npm test'
             }
           }
+        }
+      }
+    }
+
+    stage('Integration tests') {
+      agent {
+        docker {
+          image nodeImage
+          reuseNode true
+          // socket of the isolated dind daemon, not the developer machine; 2375 is its docker group
+          args '-v /var/run/docker.sock:/var/run/docker.sock --group-add 2375'
+        }
+      }
+      steps {
+        dir('app') {
+          sh 'env -u DOCKER_HOST -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH npm run test:e2e'
         }
       }
     }
