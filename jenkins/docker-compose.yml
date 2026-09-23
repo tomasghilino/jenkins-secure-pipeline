@@ -1,0 +1,51 @@
+name: jenkins
+
+services:
+  controller:
+    build: ./controller
+    image: jsp-jenkins-controller:local
+    ports:
+      - "127.0.0.1:8080:8080"
+    secrets:
+      - jenkins_admin_password
+      - agent_ssh_key
+      - github_deploy_key
+    volumes:
+      - controller-home:/var/jenkins_home
+    depends_on:
+      - agent
+
+  agent:
+    build: ./agent
+    image: jsp-jenkins-agent:local
+    environment:
+      JENKINS_AGENT_SSH_PUBKEY: ${JENKINS_AGENT_SSH_PUBKEY:?run scripts/jenkins-local-secrets.sh}
+    volumes:
+      - agent-workspace:/home/jenkins/agent
+      - docker-certs-client:/certs/client:ro
+    depends_on:
+      - docker
+
+  docker:
+    image: docker:29.8.1-dind@sha256:3f3c01aaaebf7cce837356b688b7c059a4749f10bd7660dec7c58fc454a283f0
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: /certs
+    volumes:
+      - docker-certs-client:/certs/client
+      - docker-data:/var/lib/docker
+      - agent-workspace:/home/jenkins/agent
+
+secrets:
+  jenkins_admin_password:
+    file: ./secrets/jenkins_admin_password
+  agent_ssh_key:
+    file: ./secrets/agent_ssh_key
+  github_deploy_key:
+    file: ./secrets/github_deploy_key
+
+volumes:
+  controller-home:
+  agent-workspace:
+  docker-certs-client:
+  docker-data:
