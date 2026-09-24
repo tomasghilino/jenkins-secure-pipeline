@@ -33,6 +33,9 @@ services:
     privileged: true
     environment:
       DOCKER_TLS_CERTDIR: /certs
+    # stale pid files from an unclean stop keep dockerd from starting again
+    tmpfs:
+      - /run
     volumes:
       - docker-certs-client:/certs/client
       - docker-data:/var/lib/docker
