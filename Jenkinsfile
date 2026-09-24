@@ -101,26 +101,34 @@ pipeline {
       }
     }
 
-    stage('SonarQube analysis') {
-      agent {
-        docker {
-          image scannerImage
-          reuseNode true
-          // the compose service name sonarqube only resolves in the dind network namespace
-          args '--network host'
-        }
+    stage('SonarQube') {
+      // community build tracks a single branch, so analyses from other branches would overwrite dev
+      when {
+        branch 'dev'
       }
-      steps {
-        withSonarQubeEnv('sonarqube') {
-          sh 'sonar-scanner'
+      stages {
+        stage('Analysis') {
+          agent {
+            docker {
+              image scannerImage
+              reuseNode true
+              // the compose service name sonarqube only resolves in the dind network namespace
+              args '--network host'
+            }
+          }
+          steps {
+            withSonarQubeEnv('sonarqube') {
+              sh 'sonar-scanner'
+            }
+          }
         }
-      }
-    }
 
-    stage('Quality gate') {
-      steps {
-        timeout(time: 5, unit: 'MINUTES') {
-          waitForQualityGate abortPipeline: true
+        stage('Quality gate') {
+          steps {
+            timeout(time: 5, unit: 'MINUTES') {
+              waitForQualityGate abortPipeline: true
+            }
+          }
         }
       }
     }
