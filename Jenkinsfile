@@ -1,4 +1,5 @@
 def nodeImage = 'node:24.21.0-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe'
+def scannerImage = 'sonarsource/sonar-scanner-cli:12.2.0.4256_8.1.0@sha256:a3f4215076706c95a17a68c19322ee916e40a3acd081a8c1a1e839e0194afa57'
 
 pipeline {
   agent { label 'docker' }
@@ -62,7 +63,7 @@ pipeline {
         stage('Unit tests') {
           steps {
             dir('app') {
-              sh 'npm test'
+              sh 'npm test -- --coverage'
             }
           }
         }
@@ -80,7 +81,31 @@ pipeline {
       }
       steps {
         dir('app') {
-          sh 'env -u DOCKER_HOST -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH npm run test:e2e'
+          sh 'env -u DOCKER_HOST -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH npm run test:e2e -- --coverage'
+        }
+      }
+    }
+
+    stage('SonarQube analysis') {
+      agent {
+        docker {
+          image scannerImage
+          reuseNode true
+          // the compose service name sonarqube only resolves in the dind network namespace
+          args '--network host'
+        }
+      }
+      steps {
+        withSonarQubeEnv('sonarqube') {
+          sh 'sonar-scanner'
+        }
+      }
+    }
+
+    stage('Quality gate') {
+      steps {
+        timeout(time: 5, unit: 'MINUTES') {
+          waitForQualityGate abortPipeline: true
         }
       }
     }
