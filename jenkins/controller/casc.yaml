@@ -54,6 +54,16 @@ credentials:
               privateKeySource:
                 directEntry:
                   privateKey: ${readFile:/run/secrets/github_deploy_key}
+          - string:
+              scope: GLOBAL
+              id: sonarqube-token
+              description: sonarqube analysis token for this project
+              secret: ${readFile:/run/secrets/sonarqube_token}
+          - string:
+              scope: GLOBAL
+              id: sonarqube-webhook-secret
+              description: hmac secret of the sonarqube webhook
+              secret: ${readFile:/run/secrets/sonarqube_webhook_secret}
 
 security:
   gitHostKeyVerificationConfiguration:
@@ -67,6 +77,12 @@ security:
 unclassified:
   location:
     url: http://127.0.0.1:8080/
+  sonarGlobalConfiguration:
+    installations:
+      - name: sonarqube
+        serverUrl: http://sonarqube:9000
+        credentialsId: sonarqube-token
+        webhookSecretId: sonarqube-webhook-secret
 
 jobs:
   - script: >
