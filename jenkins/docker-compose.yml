@@ -51,7 +51,7 @@ services:
       - "127.0.0.1:9000:9000"
     networks:
       - default
-      - sonarqube-db
+      - sonarqube-internal
     volumes:
       - sonarqube-data:/opt/sonarqube/data
       - sonarqube-extensions:/opt/sonarqube/extensions
@@ -79,7 +79,7 @@ services:
     secrets:
       - sonarqube_db_password
     networks:
-      - sonarqube-db
+      - sonarqube-internal
     volumes:
       - sonarqube-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -90,7 +90,7 @@ services:
     stop_grace_period: 30s
 
 networks:
-  sonarqube-db:
+  sonarqube-internal:
     internal: true
 
 secrets:
