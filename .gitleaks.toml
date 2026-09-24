@@ -1,0 +1,7 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Jenkins plugin pins such as okhttp-api:5.3.2-200.vedb_720a_cf1f8 look like api keys"
+targetRules = ["generic-api-key"]
+paths = ['''(^|/)jenkins/controller/plugins\.txt$''']

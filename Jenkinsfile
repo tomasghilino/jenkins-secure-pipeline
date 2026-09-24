@@ -1,5 +1,6 @@
 def nodeImage = 'node:24.21.0-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe'
 def scannerImage = 'sonarsource/sonar-scanner-cli:12.2.0.4256_8.1.0@sha256:a3f4215076706c95a17a68c19322ee916e40a3acd081a8c1a1e839e0194afa57'
+def gitleaksImage = 'ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f'
 
 pipeline {
   agent { label 'docker' }
@@ -24,6 +25,20 @@ pipeline {
         script {
           env.IMAGE_TAG = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
         }
+      }
+    }
+
+    stage('Secret scan') {
+      agent {
+        docker {
+          image gitleaksImage
+          reuseNode true
+          // jenkins keeps the container alive with its own command, so the gitleaks entrypoint is cleared
+          args '--entrypoint= --network none'
+        }
+      }
+      steps {
+        sh 'gitleaks git --redact --verbose --no-banner --log-opts=HEAD .'
       }
     }
 
