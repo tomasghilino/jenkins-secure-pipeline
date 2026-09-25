@@ -5,6 +5,11 @@ coverage/
 *.tsbuildinfo
 *.log
 
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+
 .env
 .env.*
 !.env.example
