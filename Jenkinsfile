@@ -1,6 +1,8 @@
 def nodeImage = 'node:24.21.0-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe'
 def scannerImage = 'sonarsource/sonar-scanner-cli:12.2.0.4256_8.1.0@sha256:a3f4215076706c95a17a68c19322ee916e40a3acd081a8c1a1e839e0194afa57'
 def gitleaksImage = 'ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f'
+def terraformImage = 'hashicorp/terraform:1.16.4@sha256:985cdc6c1d9b0a65b83377f666efd2f740b47f02ac55be1ced3d18f7d3b0e829'
+def tflintImage = 'ghcr.io/terraform-linters/tflint:v0.64.0@sha256:1c595f42d794c32c45a6ea8b58655fd66433d4ca3b1bc631c574a48d120bd19f'
 
 pipeline {
   agent { label 'docker' }
@@ -128,6 +130,57 @@ pipeline {
             timeout(time: 5, unit: 'MINUTES') {
               waitForQualityGate abortPipeline: true
             }
+          }
+        }
+      }
+    }
+
+    stage('Terraform') {
+      environment {
+        TF_IN_AUTOMATION = 'true'
+        TF_INPUT = 'false'
+        CHECKPOINT_DISABLE = 'true'
+        TF_PLUGIN_CACHE_DIR = "${WORKSPACE}/.terraform-plugins"
+      }
+      stages {
+        stage('Format and validate') {
+          agent {
+            docker {
+              image terraformImage
+              reuseNode true
+              args '--entrypoint='
+            }
+          }
+          steps {
+            sh 'mkdir -p "$TF_PLUGIN_CACHE_DIR"'
+            sh 'terraform fmt -check -recursive -diff infra'
+            // every stack commits its lock file, so new stacks are picked up without editing this list
+            sh '''
+              for lock in infra/*/.terraform.lock.hcl infra/environments/*/.terraform.lock.hcl; do
+                stack=$(dirname "$lock")
+                terraform -chdir="$stack" init -backend=false -lockfile=readonly -no-color
+                terraform -chdir="$stack" validate -no-color
+              done
+            '''
+          }
+        }
+
+        stage('TFLint') {
+          agent {
+            docker {
+              image tflintImage
+              reuseNode true
+              args '--entrypoint='
+            }
+          }
+          steps {
+            // the container user has no home, and tflint keeps plugins and the sigstore root that verifies them there
+            // recursive mode reads .tflint.hcl from each stack folder unless the config path is absolute
+            sh '''
+              export HOME="$(mktemp -d)"
+              tflint --init --config="$WORKSPACE/.tflint.hcl"
+              tflint --recursive --chdir=infra --config="$WORKSPACE/.tflint.hcl"
+            '''
           }
         }
       }
