@@ -3,6 +3,7 @@ def scannerImage = 'sonarsource/sonar-scanner-cli:12.2.0.4256_8.1.0@sha256:a3f42
 def gitleaksImage = 'ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f'
 def terraformImage = 'hashicorp/terraform:1.16.4@sha256:985cdc6c1d9b0a65b83377f666efd2f740b47f02ac55be1ced3d18f7d3b0e829'
 def tflintImage = 'ghcr.io/terraform-linters/tflint:v0.64.0@sha256:1c595f42d794c32c45a6ea8b58655fd66433d4ca3b1bc631c574a48d120bd19f'
+def checkovImage = 'bridgecrew/checkov:3.3.20@sha256:6d20ebbcde58b2dce6e3151a6771fefa4d468281fe442475455623f5799b9f53'
 
 pipeline {
   agent { label 'docker' }
@@ -181,6 +182,20 @@ pipeline {
               tflint --init --config="$WORKSPACE/.tflint.hcl"
               tflint --recursive --chdir=infra --config="$WORKSPACE/.tflint.hcl"
             '''
+          }
+        }
+
+        stage('Checkov') {
+          agent {
+            docker {
+              image checkovImage
+              reuseNode true
+              args '--entrypoint= --network none'
+            }
+          }
+          steps {
+            // --skip-download keeps checkov from calling the prisma cloud api, so it runs offline
+            sh 'checkov -d infra --framework terraform --external-checks-dir checkov --quiet --compact --skip-download'
           }
         }
       }

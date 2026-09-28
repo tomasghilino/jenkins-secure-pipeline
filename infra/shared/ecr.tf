@@ -13,6 +13,7 @@ resource "aws_ecr_registry_scanning_configuration" "main" {
 }
 
 resource "aws_ecr_repository" "api" {
+  #checkov:skip=CKV_AWS_163:scan on push is configured for the whole registry above
   name                 = "jsp-api"
   image_tag_mutability = "IMMUTABLE"
 

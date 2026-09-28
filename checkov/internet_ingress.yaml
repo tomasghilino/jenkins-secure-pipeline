@@ -1,0 +1,46 @@
+metadata:
+  id: CKV2_JSP_1
+  name: Ensure only web ports accept ingress from the internet
+  category: NETWORKING
+  guideline: Only the load balancer may be reachable from the internet, on port 80 or 443
+definition:
+  or:
+    - and:
+        - cond_type: attribute
+          resource_types:
+            - aws_vpc_security_group_ingress_rule
+          attribute: cidr_ipv4
+          operator: not_equals
+          value: 0.0.0.0/0
+        - cond_type: attribute
+          resource_types:
+            - aws_vpc_security_group_ingress_rule
+          attribute: cidr_ipv6
+          operator: not_equals
+          value: ::/0
+    - and:
+        - cond_type: attribute
+          resource_types:
+            - aws_vpc_security_group_ingress_rule
+          attribute: from_port
+          operator: equals
+          value: 80
+        - cond_type: attribute
+          resource_types:
+            - aws_vpc_security_group_ingress_rule
+          attribute: to_port
+          operator: equals
+          value: 80
+    - and:
+        - cond_type: attribute
+          resource_types:
+            - aws_vpc_security_group_ingress_rule
+          attribute: from_port
+          operator: equals
+          value: 443
+        - cond_type: attribute
+          resource_types:
+            - aws_vpc_security_group_ingress_rule
+          attribute: to_port
+          operator: equals
+          value: 443

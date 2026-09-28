@@ -1,6 +1,9 @@
 data "aws_caller_identity" "current" {}
 
 data "aws_iam_policy_document" "state_key" {
+  #checkov:skip=CKV_AWS_109:key policy, where "*" means this key only (aws default statement)
+  #checkov:skip=CKV_AWS_111:key policy, where "*" means this key only (aws default statement)
+  #checkov:skip=CKV_AWS_356:key policy, where "*" means this key only (aws default statement)
   statement {
     sid       = "AccountAdministration"
     actions   = ["kms:*"]
@@ -30,6 +33,9 @@ resource "aws_kms_alias" "state" {
 }
 
 resource "aws_s3_bucket" "state" {
+  #checkov:skip=CKV_AWS_18:reads and writes are already audited as kms calls in cloudtrail
+  #checkov:skip=CKV_AWS_144:single region project, versioning and prevent_destroy cover accidental loss
+  #checkov:skip=CKV2_AWS_62:nothing consumes bucket events
   bucket_prefix = "jsp-tfstate-"
 
   lifecycle {

@@ -8,6 +8,7 @@ resource "aws_default_security_group" "main" {
 }
 
 resource "aws_security_group" "alb" {
+  #checkov:skip=CKV2_AWS_5:attached when the load balancer is added
   name_prefix = "${local.name}-alb-"
   description = "Public application load balancer"
   vpc_id      = aws_vpc.main.id
@@ -22,6 +23,7 @@ resource "aws_security_group" "alb" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "alb_from_internet" {
+  #checkov:skip=CKV_AWS_260:public entry point, https needs an acm certificate and a domain
   security_group_id = aws_security_group.alb.id
   description       = "HTTP from the internet"
   ip_protocol       = "tcp"
@@ -40,6 +42,7 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_app" {
 }
 
 resource "aws_security_group" "app" {
+  #checkov:skip=CKV2_AWS_5:attached when the ecs service is added
   name_prefix = "${local.name}-app-"
   description = "API tasks"
   vpc_id      = aws_vpc.main.id
@@ -73,6 +76,7 @@ resource "aws_vpc_security_group_egress_rule" "app_to_db" {
 
 # no egress rules: the database never opens connections, and replies pass because security groups are stateful
 resource "aws_security_group" "db" {
+  #checkov:skip=CKV2_AWS_5:attached when the rds instance is added
   name_prefix = "${local.name}-db-"
   description = "PostgreSQL database"
   vpc_id      = aws_vpc.main.id
