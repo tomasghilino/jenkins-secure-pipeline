@@ -94,7 +94,6 @@ resource "aws_vpc_security_group_egress_rule" "app_to_s3" {
 
 # no egress rules: the database never opens connections, and replies pass because security groups are stateful
 resource "aws_security_group" "db" {
-  #checkov:skip=CKV2_AWS_5:attached when the rds instance is added
   name_prefix = "${local.name}-db-"
   description = "PostgreSQL database"
   vpc_id      = aws_vpc.main.id
