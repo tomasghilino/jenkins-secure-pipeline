@@ -8,7 +8,6 @@ resource "aws_default_security_group" "main" {
 }
 
 resource "aws_security_group" "alb" {
-  #checkov:skip=CKV2_AWS_5:attached when the load balancer is added
   name_prefix = "${local.name}-alb-"
   description = "Public application load balancer"
   vpc_id      = aws_vpc.main.id
