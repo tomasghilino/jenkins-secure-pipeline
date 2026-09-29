@@ -74,6 +74,24 @@ resource "aws_vpc_security_group_egress_rule" "app_to_db" {
   referenced_security_group_id = aws_security_group.db.id
 }
 
+resource "aws_vpc_security_group_egress_rule" "app_to_endpoints" {
+  security_group_id            = aws_security_group.app.id
+  description                  = "HTTPS to the interface endpoints"
+  ip_protocol                  = "tcp"
+  from_port                    = 443
+  to_port                      = 443
+  referenced_security_group_id = aws_security_group.endpoints.id
+}
+
+resource "aws_vpc_security_group_egress_rule" "app_to_s3" {
+  security_group_id = aws_security_group.app.id
+  description       = "HTTPS to S3 through the gateway endpoint, for image layers"
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+  prefix_list_id    = aws_vpc_endpoint.s3.prefix_list_id
+}
+
 # no egress rules: the database never opens connections, and replies pass because security groups are stateful
 resource "aws_security_group" "db" {
   #checkov:skip=CKV2_AWS_5:attached when the rds instance is added
@@ -96,5 +114,29 @@ resource "aws_vpc_security_group_ingress_rule" "db_from_app" {
   ip_protocol                  = "tcp"
   from_port                    = local.db_port
   to_port                      = local.db_port
+  referenced_security_group_id = aws_security_group.app.id
+}
+
+# no egress rules: the endpoints only answer requests
+resource "aws_security_group" "endpoints" {
+  name_prefix = "${local.name}-endpoints-"
+  description = "Interface VPC endpoints"
+  vpc_id      = aws_vpc.main.id
+
+  tags = {
+    Name = "${local.name}-endpoints-sg"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "endpoints_from_app" {
+  security_group_id            = aws_security_group.endpoints.id
+  description                  = "HTTPS from the app"
+  ip_protocol                  = "tcp"
+  from_port                    = 443
+  to_port                      = 443
   referenced_security_group_id = aws_security_group.app.id
 }
