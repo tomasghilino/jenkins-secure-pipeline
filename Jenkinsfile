@@ -261,6 +261,15 @@ pipeline {
             sh 'trivy image --scanners secret --exit-code 1 --input jsp-api.tar'
           }
         }
+
+        stage('SBOM') {
+          steps {
+            // cyclonedx inventory of every os package and npm library in the image, kept with the build
+            // so a future advisory can be checked with trivy sbom without pulling the image again
+            sh 'trivy image --format cyclonedx --output jsp-api.cdx.json --input jsp-api.tar'
+            archiveArtifacts artifacts: 'jsp-api.cdx.json', fingerprint: true
+          }
+        }
       }
     }
   }
