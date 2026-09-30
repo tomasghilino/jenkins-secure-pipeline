@@ -61,6 +61,19 @@ pipeline {
           }
         }
 
+        stage('Dependency audit') {
+          steps {
+            dir('app') {
+              // report every advisory, dev tooling included, without failing the build
+              sh 'npm audit --audit-level=none'
+              // block high and critical advisories in the dependencies that ship in the image
+              sh 'npm audit --omit=dev --audit-level=high'
+              // every installed package must carry a valid npm registry signature
+              sh 'npm audit signatures'
+            }
+          }
+        }
+
         stage('Lint') {
           steps {
             dir('app') {
