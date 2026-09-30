@@ -41,7 +41,6 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_app" {
 }
 
 resource "aws_security_group" "app" {
-  #checkov:skip=CKV2_AWS_5:attached when the ecs service is added
   name_prefix = "${local.name}-app-"
   description = "API tasks"
   vpc_id      = aws_vpc.main.id
