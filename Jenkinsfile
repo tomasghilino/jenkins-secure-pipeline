@@ -4,6 +4,9 @@ def gitleaksImage = 'ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbc
 def terraformImage = 'hashicorp/terraform:1.16.4@sha256:985cdc6c1d9b0a65b83377f666efd2f740b47f02ac55be1ced3d18f7d3b0e829'
 def tflintImage = 'ghcr.io/terraform-linters/tflint:v0.64.0@sha256:1c595f42d794c32c45a6ea8b58655fd66433d4ca3b1bc631c574a48d120bd19f'
 def checkovImage = 'bridgecrew/checkov:3.3.20@sha256:6d20ebbcde58b2dce6e3151a6771fefa4d468281fe442475455623f5799b9f53'
+// trivy releases were hijacked in march 2026, so this digest was pinned only after cosign verified
+// it was signed by the aquasecurity/trivy release workflow
+def trivyImage = 'ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969'
 
 pipeline {
   agent { label 'docker' }
@@ -223,6 +226,41 @@ pipeline {
             -t jsp-api:"$IMAGE_TAG" \
             app
         '''
+        // scanners read the image from a file, so they never need access to the docker daemon
+        sh 'docker save -o jsp-api.tar jsp-api:"$IMAGE_TAG"'
+      }
+    }
+
+    stage('Trivy') {
+      agent {
+        docker {
+          image trivyImage
+          reuseNode true
+          args '--entrypoint='
+        }
+      }
+      environment {
+        TRIVY_CACHE_DIR = "${WORKSPACE}/.trivy-cache"
+        TRIVY_IGNOREFILE = "${WORKSPACE}/.trivyignore"
+      }
+      stages {
+        stage('Filesystem scan') {
+          steps {
+            // the lock file lists every dependency; installed node_modules would only repeat it
+            sh 'trivy fs --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --skip-dirs app/node_modules app'
+          }
+        }
+
+        stage('Image scan') {
+          steps {
+            // full report of every severity, including accepted findings, without failing the build
+            sh 'trivy image --scanners vuln --show-suppressed --input jsp-api.tar'
+            // block high and critical vulnerabilities that already have a fixed version
+            sh 'trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --input jsp-api.tar'
+            // block any secret baked into an image layer, whatever its severity
+            sh 'trivy image --scanners secret --exit-code 1 --input jsp-api.tar'
+          }
+        }
       }
     }
   }
