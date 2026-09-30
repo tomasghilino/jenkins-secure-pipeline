@@ -7,4 +7,5 @@
 !nest-cli.json
 !src/
 !migrations/
+!certs/
 **/*.spec.ts

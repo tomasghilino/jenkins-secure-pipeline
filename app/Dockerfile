@@ -20,5 +20,8 @@ COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 COPY migrations ./migrations
+# amazon rds root certificates, so pg can verify the database when PGSSLMODE requires tls
+COPY certs/rds-us-east-1-bundle.pem ./certs/
+ENV NODE_EXTRA_CA_CERTS=/app/certs/rds-us-east-1-bundle.pem
 EXPOSE 3000
 CMD ["dist/main.js"]
