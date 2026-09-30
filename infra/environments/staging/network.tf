@@ -1,5 +1,4 @@
 resource "aws_vpc" "main" {
-  #checkov:skip=CKV2_AWS_11:no traffic yet, flow logs are added with the alb, ecs and rds
   cidr_block           = "10.0.0.0/16"
   enable_dns_support   = true
   enable_dns_hostnames = true

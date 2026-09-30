@@ -32,8 +32,7 @@ resource "aws_db_instance" "main" {
   #checkov:skip=CKV_AWS_118:basic cloudwatch metrics are enough for a short lived staging database
   #checkov:skip=CKV_AWS_353:basic cloudwatch metrics are enough for a short lived staging database
   #checkov:skip=CKV_AWS_161:the app authenticates with the password from secrets manager
-  #checkov:skip=CKV_AWS_129:postgres logs are exported with the cloudwatch logs commit
-  identifier     = "${local.name}-db"
+  identifier     = local.db_identifier
   engine         = "postgres"
   engine_version = "17"
   instance_class = "db.t4g.micro"
@@ -59,7 +58,12 @@ resource "aws_db_instance" "main" {
   copy_tags_to_snapshot      = true
   auto_minor_version_upgrade = true
 
+  enabled_cloudwatch_logs_exports = ["postgresql"]
+
   # staging is destroyed after every session and holds no data worth keeping
   skip_final_snapshot = true
   deletion_protection = false
+
+  # the log group must exist first, otherwise rds creates it without retention and outside terraform
+  depends_on = [aws_cloudwatch_log_group.db]
 }
