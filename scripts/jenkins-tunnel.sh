@@ -4,8 +4,8 @@ set -euo pipefail
 # usage: scripts/jenkins-tunnel.sh [jenkins|sonarqube]
 service=${1:-jenkins}
 case $service in
-  jenkins) remote_port=8080; local_port=18080 ;;
-  sonarqube) remote_port=9000; local_port=19000 ;;
+  jenkins) port=8080 ;;
+  sonarqube) port=9000 ;;
   *) echo "usage: $0 [jenkins|sonarqube]" >&2; exit 1 ;;
 esac
 
@@ -18,7 +18,7 @@ if [ "$instance_id" = "None" ]; then
   exit 1
 fi
 
-echo "$service on http://127.0.0.1:$local_port (ctrl+c to close)"
+echo "$service on http://127.0.0.1:$port (ctrl+c to close)"
 exec aws ssm start-session --target "$instance_id" \
   --document-name AWS-StartPortForwardingSession \
-  --parameters "portNumber=$remote_port,localPortNumber=$local_port"
+  --parameters "portNumber=$port,localPortNumber=$port"
