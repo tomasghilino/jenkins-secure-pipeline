@@ -1,0 +1,4 @@
+services:
+  docker:
+    # build containers inside dind fall back to public dns, which the ci security group blocks, so they use the vpc resolver
+    command: ["--dns", "169.254.169.253"]

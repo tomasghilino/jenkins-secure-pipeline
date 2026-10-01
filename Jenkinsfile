@@ -131,8 +131,8 @@ pipeline {
             docker {
               image scannerImage
               reuseNode true
-              // the compose service name sonarqube only resolves in the dind network namespace
-              args '--network host'
+              // the compose service name sonarqube only resolves through docker's embedded dns in the dind network namespace
+              args '--network host --dns 127.0.0.11'
             }
           }
           steps {
