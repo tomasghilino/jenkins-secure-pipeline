@@ -7,6 +7,7 @@ def checkovImage = 'bridgecrew/checkov:3.3.20@sha256:6d20ebbcde58b2dce6e3151a677
 // trivy releases were hijacked in march 2026, so this digest was pinned only after cosign verified
 // it was signed by the aquasecurity/trivy release workflow
 def trivyImage = 'ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969'
+def awsCliImage = 'amazon/aws-cli:2.37.8@sha256:420ab345e847291b541b45d989535f55bcff957c27fa1100fae4aa233e86398c'
 
 pipeline {
   agent { label 'docker' }
@@ -270,6 +271,40 @@ pipeline {
             archiveArtifacts artifacts: 'jsp-api.cdx.json', fingerprint: true
           }
         }
+      }
+    }
+
+    stage('Push to ECR') {
+      when { branch 'dev' }
+      environment {
+        AWS_REGION = 'us-east-1'
+        // only the dind network namespace is close enough to imds for the instance role, build containers are not
+        AWS = "docker run --rm --network host -e AWS_REGION ${awsCliImage}"
+        // registry credentials live in the workspace and are deleted with it
+        DOCKER_CONFIG = "${WORKSPACE}/.docker"
+      }
+      steps {
+        script {
+          def account = sh(script: '$AWS sts get-caller-identity --query Account --output text', returnStdout: true).trim()
+          env.ECR_IMAGE = "${account}.dkr.ecr.${AWS_REGION}.amazonaws.com/jsp-api:${IMAGE_TAG}"
+        }
+        sh '''
+          if found=$($AWS ecr describe-images --repository-name jsp-api --image-ids imageTag="$IMAGE_TAG" 2>&1); then
+            echo "jsp-api:$IMAGE_TAG is already in ecr and tags are immutable, skipping the push"
+            exit 0
+          fi
+          case $found in
+            *ImageNotFoundException*) ;;
+            *) echo "$found" >&2; exit 1 ;;
+          esac
+
+          registry=${ECR_IMAGE%%/*}
+          $AWS ecr get-login-password | docker login --username AWS --password-stdin "$registry"
+          docker tag jsp-api:"$IMAGE_TAG" "$ECR_IMAGE"
+          docker push "$ECR_IMAGE"
+          docker logout "$registry"
+          docker rmi "$ECR_IMAGE"
+        '''
       }
     }
   }
