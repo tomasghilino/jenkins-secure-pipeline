@@ -8,6 +8,8 @@ def checkovImage = 'bridgecrew/checkov:3.3.20@sha256:6d20ebbcde58b2dce6e3151a677
 // it was signed by the aquasecurity/trivy release workflow
 def trivyImage = 'ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969'
 def awsCliImage = 'amazon/aws-cli:2.37.8@sha256:420ab345e847291b541b45d989535f55bcff957c27fa1100fae4aa233e86398c'
+// pinned after cosign verified its slsa provenance from the jqlang/jq release workflow
+def jqImage = 'ghcr.io/jqlang/jq:1.8.2@sha256:b9c68867e5766576263a222e91db3de422d802069c7af70440e667a95344e486'
 
 pipeline {
   agent { label 'docker' }
@@ -23,6 +25,9 @@ pipeline {
     CI = 'true'
     NO_COLOR = '1'
     npm_config_cache = "${WORKSPACE}/.npm-cache"
+    AWS_REGION = 'us-east-1'
+    // only the dind network namespace is close enough to imds for the instance role, build containers are not
+    AWS = "docker run --rm --network host -e AWS_REGION ${awsCliImage}"
   }
 
   stages {
@@ -277,9 +282,6 @@ pipeline {
     stage('Push to ECR') {
       when { branch 'dev' }
       environment {
-        AWS_REGION = 'us-east-1'
-        // only the dind network namespace is close enough to imds for the instance role, build containers are not
-        AWS = "docker run --rm --network host -e AWS_REGION ${awsCliImage}"
         // registry credentials live in the workspace and are deleted with it
         DOCKER_CONFIG = "${WORKSPACE}/.docker"
       }
@@ -305,6 +307,83 @@ pipeline {
           docker logout "$registry"
           docker rmi "$ECR_IMAGE"
         '''
+      }
+    }
+
+    stage('Deploy staging') {
+      when { branch 'dev' }
+      environment {
+        ECS_CLUSTER = 'jsp-staging'
+        ECS_SERVICE = 'api'
+        TASK_FAMILY = 'jsp-staging-api'
+        JQ = "docker run --rm -i --network none ${jqImage}"
+      }
+      stages {
+        stage('Register revision') {
+          steps {
+            // terraform owns everything in the task definition except the image, so jenkins copies the
+            // latest revision, drops the fields aws generates and swaps only the image
+            sh '''
+              $AWS ecs describe-task-definition --task-definition "$TASK_FAMILY" --include TAGS --output json > task-definition.json
+              $JQ --arg image "$ECR_IMAGE" '
+                .tags as $tags
+                | .taskDefinition
+                | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
+                | .containerDefinitions |= map(if .name == "api" then .image = $image else . end)
+                | .tags = ($tags | map(if .key == "ManagedBy" then .value = "jenkins" else . end))
+              ' < task-definition.json > task-definition-new.json
+            '''
+            script {
+              // the aws cli container cannot see the workspace, so the json goes in as an argument
+              env.TASK_DEFINITION = sh(
+                script: '$AWS ecs register-task-definition --cli-input-json "$(cat task-definition-new.json)" --query taskDefinition.taskDefinitionArn --output text',
+                returnStdout: true
+              ).trim()
+            }
+            echo "registered ${env.TASK_DEFINITION} with ${env.ECR_IMAGE}"
+          }
+        }
+
+        stage('Migrate database') {
+          steps {
+            // a one-off task with the new revision, so the schema is ready before any new api task serves traffic
+            sh '''
+              network=$($AWS ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --query 'services[0].networkConfiguration' --output json)
+              task=$($AWS ecs run-task --cluster "$ECS_CLUSTER" --task-definition "$TASK_DEFINITION" \
+                --launch-type FARGATE --started-by jenkins-migrate --propagate-tags TASK_DEFINITION \
+                --network-configuration "$network" \
+                --overrides '{"containerOverrides":[{"name":"api","command":["node_modules/node-pg-migrate/bin/node-pg-migrate.js","up"]}]}' \
+                --query 'tasks[0].taskArn' --output text)
+              if [ "$task" = None ]; then
+                echo "the migration task did not start" >&2
+                exit 1
+              fi
+
+              $AWS ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$task"
+              code=$($AWS ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$task" --query 'tasks[0].containers[0].exitCode' --output text)
+              if [ "$code" != 0 ]; then
+                $AWS ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$task" --query 'tasks[0].stoppedReason' --output text >&2
+                echo "migrations failed with exit code $code, logs in /ecs/$TASK_FAMILY stream api/api/${task##*/}" >&2
+                exit 1
+              fi
+            '''
+          }
+        }
+
+        stage('Roll out service') {
+          steps {
+            sh '$AWS ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" --task-definition "$TASK_DEFINITION" --query service.taskDefinition --output text'
+            // returns once the old task is drained and only the new revision runs, or fails after ten minutes
+            sh '$AWS ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"'
+            sh '''
+              running=$($AWS ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --query 'services[0].taskDefinition' --output text)
+              if [ "$running" != "$TASK_DEFINITION" ]; then
+                echo "the service runs $running instead of $TASK_DEFINITION" >&2
+                exit 1
+              fi
+            '''
+          }
+        }
       }
     }
   }
