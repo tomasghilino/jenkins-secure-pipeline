@@ -10,6 +10,8 @@ def trivyImage = 'ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa
 def awsCliImage = 'amazon/aws-cli:2.37.8@sha256:420ab345e847291b541b45d989535f55bcff957c27fa1100fae4aa233e86398c'
 // pinned after cosign verified its slsa provenance from the jqlang/jq release workflow
 def jqImage = 'ghcr.io/jqlang/jq:1.8.2@sha256:b9c68867e5766576263a222e91db3de422d802069c7af70440e667a95344e486'
+// pinned after cosign verified it against the public key published in the curl/curl-container repository
+def curlImage = 'curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777'
 
 pipeline {
   agent { label 'docker' }
@@ -384,6 +386,29 @@ pipeline {
             '''
           }
         }
+      }
+    }
+
+    stage('Smoke test') {
+      when { branch 'dev' }
+      environment {
+        // retries cover the seconds after a rollout while the load balancer settles
+        CURL = "docker run --rm ${curlImage} --fail --silent --show-error --max-time 10 --retry 5 --retry-all-errors --retry-delay 3"
+      }
+      steps {
+        script {
+          def alb = sh(script: '$AWS elbv2 describe-load-balancers --names jsp-staging-alb --query "LoadBalancers[0].DNSName" --output text', returnStdout: true).trim()
+          env.STAGING_URL = "http://${alb}"
+        }
+        // /users reads the database, so it also proves the tasks reach rds and the migrations ran
+        sh '''
+          health=$($CURL "$STAGING_URL/health")
+          if [ "$health" != '{"status":"ok"}' ]; then
+            echo "unexpected /health response: $health" >&2
+            exit 1
+          fi
+          $CURL "$STAGING_URL/users" > /dev/null
+        '''
       }
     }
   }
