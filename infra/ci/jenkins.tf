@@ -29,6 +29,16 @@ resource "aws_vpc_security_group_egress_rule" "jenkins_https" {
   cidr_ipv4         = "0.0.0.0/0"
 }
 
+resource "aws_vpc_security_group_egress_rule" "jenkins_http" {
+  security_group_id = aws_security_group.jenkins.id
+  description       = "HTTP to the staging load balancer for smoke tests and ZAP"
+  ip_protocol       = "tcp"
+  from_port         = 80
+  to_port           = 80
+  # the load balancer ips change every time staging is created, and it has no tls listener yet
+  cidr_ipv4 = "0.0.0.0/0"
+}
+
 resource "aws_vpc_security_group_egress_rule" "jenkins_git_ssh" {
   security_group_id = aws_security_group.jenkins.id
   description       = "Git over SSH to GitHub with the deploy key"
@@ -83,6 +93,83 @@ resource "aws_iam_role_policy" "jenkins_ecr_push" {
   name   = "push-api-image"
   role   = aws_iam_role.jenkins.id
   policy = data.aws_iam_policy_document.jenkins_ecr_push.json
+}
+
+data "aws_iam_policy_document" "jenkins_deploy_staging" {
+  # these read only calls do not support resource level permissions
+  statement {
+    sid       = "Lookups"
+    actions   = ["ecs:DescribeTaskDefinition", "elasticloadbalancing:DescribeLoadBalancers"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "RegisterApiRevisions"
+    actions   = ["ecs:RegisterTaskDefinition"]
+    resources = ["${local.ecs_arn_prefix}:task-definition/${local.staging_name}-api:*"]
+  }
+
+  statement {
+    sid       = "RunMigrations"
+    actions   = ["ecs:RunTask"]
+    resources = ["${local.ecs_arn_prefix}:task-definition/${local.staging_name}-api:*"]
+
+    condition {
+      test     = "ArnEquals"
+      variable = "ecs:cluster"
+      values   = ["${local.ecs_arn_prefix}:cluster/${local.staging_name}"]
+    }
+  }
+
+  statement {
+    sid       = "WatchMigrations"
+    actions   = ["ecs:DescribeTasks"]
+    resources = ["${local.ecs_arn_prefix}:task/${local.staging_name}/*"]
+  }
+
+  # tags are copied onto new revisions and migration tasks, and can only be set while creating them
+  statement {
+    sid     = "TagOnCreate"
+    actions = ["ecs:TagResource"]
+    resources = [
+      "${local.ecs_arn_prefix}:task-definition/${local.staging_name}-api:*",
+      "${local.ecs_arn_prefix}:task/${local.staging_name}/*",
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ecs:CreateAction"
+      values   = ["RegisterTaskDefinition", "RunTask"]
+    }
+  }
+
+  statement {
+    sid       = "DeployApiService"
+    actions   = ["ecs:DescribeServices", "ecs:UpdateService"]
+    resources = ["${local.ecs_arn_prefix}:service/${local.staging_name}/api"]
+  }
+
+  # the staging roles use name prefixes, and staging recreates them every session
+  statement {
+    sid     = "PassApiTaskRoles"
+    actions = ["iam:PassRole"]
+    resources = [
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.staging_name}-ecs-execution-*",
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.staging_name}-ecs-task-*",
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["ecs-tasks.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "jenkins_deploy_staging" {
+  name   = "deploy-api-staging"
+  role   = aws_iam_role.jenkins.id
+  policy = data.aws_iam_policy_document.jenkins_deploy_staging.json
 }
 
 resource "aws_iam_instance_profile" "jenkins" {

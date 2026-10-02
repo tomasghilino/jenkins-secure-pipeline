@@ -150,6 +150,11 @@ resource "aws_ecs_service" "api" {
 
   # the target group must be attached to the load balancer before a service can use it
   depends_on = [aws_lb_listener.http]
+
+  lifecycle {
+    # jenkins deploys every commit as a new revision, terraform only sets the first one
+    ignore_changes = [task_definition]
+  }
 }
 
 resource "aws_cloudwatch_query_definition" "api_errors" {
