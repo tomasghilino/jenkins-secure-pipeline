@@ -12,6 +12,8 @@ def awsCliImage = 'amazon/aws-cli:2.37.8@sha256:420ab345e847291b541b45d989535f55
 def jqImage = 'ghcr.io/jqlang/jq:1.8.2@sha256:b9c68867e5766576263a222e91db3de422d802069c7af70440e667a95344e486'
 // pinned after cosign verified it against the public key published in the curl/curl-container repository
 def curlImage = 'curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777'
+// zap publishes no signatures or provenance, so the digest of the official 2.17.0 image is the only pin
+def zapImage = 'ghcr.io/zaproxy/zaproxy:2.17.0@sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef'
 
 pipeline {
   agent { label 'docker' }
@@ -409,6 +411,25 @@ pipeline {
           fi
           $CURL "$STAGING_URL/users" > /dev/null
         '''
+      }
+    }
+
+    stage('ZAP baseline') {
+      when { branch 'dev' }
+      environment {
+        // zap reads its rule policy from /zap/wrk and writes the reports next to it
+        ZAP = "docker run --rm -v ${WORKSPACE}/zap:/zap/wrk:rw ${zapImage}"
+      }
+      steps {
+        // the api has no links to crawl, so the passive scan starts from a real endpoint
+        // -silent keeps zap from updating its rules over the internet, so results depend only on the pinned image
+        // -I lets WARN rules pass, while any FAIL rule from zap/baseline.conf exits 1 and blocks promotion
+        sh '$ZAP zap-baseline.py -t "$STAGING_URL/users" -c baseline.conf -I -z -silent -r zap-report.html -J zap-report.json'
+      }
+      post {
+        always {
+          archiveArtifacts artifacts: 'zap/zap-report.*', allowEmptyArchive: true
+        }
       }
     }
   }
