@@ -15,6 +15,90 @@ def curlImage = 'curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0
 // zap publishes no signatures or provenance, so the digest of the official 2.17.0 image is the only pin
 def zapImage = 'ghcr.io/zaproxy/zaproxy:2.17.0@sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef'
 
+// staging and production deploy the same way, only the names of their ecs resources differ
+def deployApi(String environmentName) {
+  withEnv(["ECS_CLUSTER=jsp-${environmentName}", 'ECS_SERVICE=api', "TASK_FAMILY=jsp-${environmentName}-api"]) {
+    stage('Register revision') {
+      // terraform owns everything in the task definition except the image, so jenkins copies the
+      // latest revision, drops the fields aws generates and swaps only the image
+      sh '''
+        $AWS ecs describe-task-definition --task-definition "$TASK_FAMILY" --include TAGS --output json > task-definition.json
+        $JQ --arg image "$ECR_IMAGE" '
+          .tags as $tags
+          | .taskDefinition
+          | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
+          | .containerDefinitions |= map(if .name == "api" then .image = $image else . end)
+          | .tags = ($tags | map(if .key == "ManagedBy" then .value = "jenkins" else . end))
+        ' < task-definition.json > task-definition-new.json
+      '''
+      // the aws cli container cannot see the workspace, so the json goes in as an argument
+      env.TASK_DEFINITION = sh(
+        script: '$AWS ecs register-task-definition --cli-input-json "$(cat task-definition-new.json)" --query taskDefinition.taskDefinitionArn --output text',
+        returnStdout: true
+      ).trim()
+      echo "registered ${env.TASK_DEFINITION} with ${env.ECR_IMAGE}"
+    }
+
+    stage('Migrate database') {
+      // a one-off task with the new revision, so the schema is ready before any new api task serves traffic
+      sh '''
+        network=$($AWS ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --query 'services[0].networkConfiguration' --output json)
+        task=$($AWS ecs run-task --cluster "$ECS_CLUSTER" --task-definition "$TASK_DEFINITION" \
+          --launch-type FARGATE --started-by jenkins-migrate --propagate-tags TASK_DEFINITION \
+          --network-configuration "$network" \
+          --overrides '{"containerOverrides":[{"name":"api","command":["node_modules/node-pg-migrate/bin/node-pg-migrate.js","up"]}]}' \
+          --query 'tasks[0].taskArn' --output text)
+        if [ "$task" = None ]; then
+          echo "the migration task did not start" >&2
+          exit 1
+        fi
+
+        $AWS ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$task"
+        code=$($AWS ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$task" --query 'tasks[0].containers[0].exitCode' --output text)
+        if [ "$code" != 0 ]; then
+          $AWS ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$task" --query 'tasks[0].stoppedReason' --output text >&2
+          echo "migrations failed with exit code $code, logs in /ecs/$TASK_FAMILY stream api/api/${task##*/}" >&2
+          exit 1
+        fi
+      '''
+    }
+
+    stage('Roll out service') {
+      sh '$AWS ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" --task-definition "$TASK_DEFINITION" --query service.taskDefinition --output text'
+      // returns once the old task is drained and only the new revision runs, or fails after ten minutes
+      sh '$AWS ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"'
+      sh '''
+        running=$($AWS ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --query 'services[0].taskDefinition' --output text)
+        if [ "$running" != "$TASK_DEFINITION" ]; then
+          echo "the service runs $running instead of $TASK_DEFINITION" >&2
+          exit 1
+        fi
+      '''
+    }
+  }
+}
+
+// /users reads the database, so it also proves the tasks reach rds and the migrations ran
+def smokeTest(String environmentName) {
+  withEnv(["LOAD_BALANCER=jsp-${environmentName}-alb"]) {
+    def url = 'http://' + sh(
+      script: '$AWS elbv2 describe-load-balancers --names "$LOAD_BALANCER" --query "LoadBalancers[0].DNSName" --output text',
+      returnStdout: true
+    ).trim()
+    withEnv(["BASE_URL=${url}"]) {
+      sh '''
+        health=$($CURL "$BASE_URL/health")
+        if [ "$health" != '{"status":"ok"}' ]; then
+          echo "unexpected /health response: $health" >&2
+          exit 1
+        fi
+        $CURL "$BASE_URL/users" > /dev/null
+      '''
+    }
+    return url
+  }
+}
+
 pipeline {
   agent { label 'docker' }
 
@@ -33,6 +117,9 @@ pipeline {
     AWS_REGION = 'us-east-1'
     // only the dind network namespace is close enough to imds for the instance role, build containers are not
     AWS = "docker run --rm --network host -e AWS_REGION ${awsCliImage}"
+    JQ = "docker run --rm -i --network none ${jqImage}"
+    // retries cover the seconds after a rollout while the load balancer settles
+    CURL = "docker run --rm ${curlImage} --fail --silent --show-error --max-time 10 --retry 5 --retry-all-errors --retry-delay 3"
   }
 
   stages {
@@ -317,101 +404,19 @@ pipeline {
 
     stage('Deploy staging') {
       when { branch 'dev' }
-      environment {
-        ECS_CLUSTER = 'jsp-staging'
-        ECS_SERVICE = 'api'
-        TASK_FAMILY = 'jsp-staging-api'
-        JQ = "docker run --rm -i --network none ${jqImage}"
-      }
-      stages {
-        stage('Register revision') {
-          steps {
-            // terraform owns everything in the task definition except the image, so jenkins copies the
-            // latest revision, drops the fields aws generates and swaps only the image
-            sh '''
-              $AWS ecs describe-task-definition --task-definition "$TASK_FAMILY" --include TAGS --output json > task-definition.json
-              $JQ --arg image "$ECR_IMAGE" '
-                .tags as $tags
-                | .taskDefinition
-                | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
-                | .containerDefinitions |= map(if .name == "api" then .image = $image else . end)
-                | .tags = ($tags | map(if .key == "ManagedBy" then .value = "jenkins" else . end))
-              ' < task-definition.json > task-definition-new.json
-            '''
-            script {
-              // the aws cli container cannot see the workspace, so the json goes in as an argument
-              env.TASK_DEFINITION = sh(
-                script: '$AWS ecs register-task-definition --cli-input-json "$(cat task-definition-new.json)" --query taskDefinition.taskDefinitionArn --output text',
-                returnStdout: true
-              ).trim()
-            }
-            echo "registered ${env.TASK_DEFINITION} with ${env.ECR_IMAGE}"
-          }
-        }
-
-        stage('Migrate database') {
-          steps {
-            // a one-off task with the new revision, so the schema is ready before any new api task serves traffic
-            sh '''
-              network=$($AWS ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --query 'services[0].networkConfiguration' --output json)
-              task=$($AWS ecs run-task --cluster "$ECS_CLUSTER" --task-definition "$TASK_DEFINITION" \
-                --launch-type FARGATE --started-by jenkins-migrate --propagate-tags TASK_DEFINITION \
-                --network-configuration "$network" \
-                --overrides '{"containerOverrides":[{"name":"api","command":["node_modules/node-pg-migrate/bin/node-pg-migrate.js","up"]}]}' \
-                --query 'tasks[0].taskArn' --output text)
-              if [ "$task" = None ]; then
-                echo "the migration task did not start" >&2
-                exit 1
-              fi
-
-              $AWS ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$task"
-              code=$($AWS ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$task" --query 'tasks[0].containers[0].exitCode' --output text)
-              if [ "$code" != 0 ]; then
-                $AWS ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$task" --query 'tasks[0].stoppedReason' --output text >&2
-                echo "migrations failed with exit code $code, logs in /ecs/$TASK_FAMILY stream api/api/${task##*/}" >&2
-                exit 1
-              fi
-            '''
-          }
-        }
-
-        stage('Roll out service') {
-          steps {
-            sh '$AWS ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" --task-definition "$TASK_DEFINITION" --query service.taskDefinition --output text'
-            // returns once the old task is drained and only the new revision runs, or fails after ten minutes
-            sh '$AWS ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"'
-            sh '''
-              running=$($AWS ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --query 'services[0].taskDefinition' --output text)
-              if [ "$running" != "$TASK_DEFINITION" ]; then
-                echo "the service runs $running instead of $TASK_DEFINITION" >&2
-                exit 1
-              fi
-            '''
-          }
+      steps {
+        script {
+          deployApi('staging')
         }
       }
     }
 
     stage('Smoke test') {
       when { branch 'dev' }
-      environment {
-        // retries cover the seconds after a rollout while the load balancer settles
-        CURL = "docker run --rm ${curlImage} --fail --silent --show-error --max-time 10 --retry 5 --retry-all-errors --retry-delay 3"
-      }
       steps {
         script {
-          def alb = sh(script: '$AWS elbv2 describe-load-balancers --names jsp-staging-alb --query "LoadBalancers[0].DNSName" --output text', returnStdout: true).trim()
-          env.STAGING_URL = "http://${alb}"
+          env.STAGING_URL = smokeTest('staging')
         }
-        // /users reads the database, so it also proves the tasks reach rds and the migrations ran
-        sh '''
-          health=$($CURL "$STAGING_URL/health")
-          if [ "$health" != '{"status":"ok"}' ]; then
-            echo "unexpected /health response: $health" >&2
-            exit 1
-          fi
-          $CURL "$STAGING_URL/users" > /dev/null
-        '''
       }
     }
 
@@ -452,6 +457,25 @@ pipeline {
       }
       steps {
         echo "${APPROVER} approved ${ECR_IMAGE} for production"
+      }
+    }
+
+    stage('Deploy production') {
+      when { branch 'dev' }
+      steps {
+        script {
+          // the exact image staging just validated, never rebuilt
+          deployApi('production')
+        }
+      }
+    }
+
+    stage('Verify production') {
+      when { branch 'dev' }
+      steps {
+        script {
+          smokeTest('production')
+        }
       }
     }
   }
