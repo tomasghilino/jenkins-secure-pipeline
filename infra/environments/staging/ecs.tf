@@ -145,6 +145,13 @@ resource "aws_ecs_service" "api" {
     container_port   = local.app_port
   }
 
+  # after three new tasks in a row fail to start or fail the load balancer health check, ecs marks the
+  # deployment failed and goes back to the last revision that completed
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   # apply finishes only when the task is running and healthy behind the load balancer
   wait_for_steady_state = true
 

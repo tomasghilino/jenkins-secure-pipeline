@@ -65,14 +65,20 @@ def deployApi(String environmentName) {
 
     stage('Roll out service') {
       sh '$AWS ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" --task-definition "$TASK_DEFINITION" --query service.taskDefinition --output text'
-      // returns once the old task is drained and only the new revision runs, or fails after ten minutes
-      sh '$AWS ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"'
+      // the service settles on the new revision, or on the previous one once the circuit breaker rolls back,
+      // and the waiter gives up after ten minutes; on failure the ecs events say what happened
       sh '''
+        $AWS ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" || settled=no
         running=$($AWS ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --query 'services[0].taskDefinition' --output text)
         if [ "$running" != "$TASK_DEFINITION" ]; then
-          echo "the service runs $running instead of $TASK_DEFINITION" >&2
-          exit 1
+          echo "the circuit breaker rolled the service back to $running, $TASK_DEFINITION never became healthy" >&2
+        elif [ "$settled" = no ]; then
+          echo "the service did not settle on $TASK_DEFINITION within ten minutes" >&2
+        else
+          exit 0
         fi
+        $AWS ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --query 'services[0].events[:8].[createdAt,message]' --output text >&2
+        exit 1
       '''
     }
   }
