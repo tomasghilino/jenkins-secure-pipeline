@@ -35,7 +35,8 @@ resource "aws_db_instance" "main" {
   identifier     = local.db_identifier
   engine         = "postgres"
   engine_version = "17"
-  instance_class = "db.t4g.micro"
+  # db.t4g.micro is cheaper but kept failing with InsufficientDBInstanceCapacity in our two zones
+  instance_class = "db.t3.micro"
 
   allocated_storage = 20
   storage_type      = "gp3"
