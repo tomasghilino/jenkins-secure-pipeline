@@ -21,7 +21,8 @@ pipeline {
   options {
     skipDefaultCheckout()
     disableConcurrentBuilds()
-    timeout(time: 30, unit: 'MINUTES')
+    // a full build plus the 30 minutes the production approval may wait
+    timeout(time: 60, unit: 'MINUTES')
     buildDiscarder(logRotator(numToKeepStr: '20'))
   }
 
@@ -430,6 +431,27 @@ pipeline {
         always {
           archiveArtifacts artifacts: 'zap/zap-report.*', allowEmptyArchive: true
         }
+      }
+    }
+
+    stage('Approve production') {
+      when {
+        // evaluated before the input, so other branches are never asked
+        beforeInput true
+        branch 'dev'
+      }
+      options {
+        // an unanswered approval aborts the build, so the image is simply not promoted
+        timeout(time: 30, unit: 'MINUTES')
+      }
+      input {
+        message 'Deploy this image to production?'
+        ok 'Deploy to production'
+        submitter 'admin'
+        submitterParameter 'APPROVER'
+      }
+      steps {
+        echo "${APPROVER} approved ${ECR_IMAGE} for production"
       }
     }
   }
