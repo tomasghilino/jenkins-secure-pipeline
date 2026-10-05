@@ -31,11 +31,11 @@ resource "aws_vpc_security_group_egress_rule" "jenkins_https" {
 
 resource "aws_vpc_security_group_egress_rule" "jenkins_http" {
   security_group_id = aws_security_group.jenkins.id
-  description       = "HTTP to the staging load balancer for smoke tests and ZAP"
+  description       = "HTTP to the environment load balancers for smoke tests and ZAP"
   ip_protocol       = "tcp"
   from_port         = 80
   to_port           = 80
-  # the load balancer ips change every time staging is created, and it has no tls listener yet
+  # the load balancer ips change every time an environment is created, and they have no tls listener yet
   cidr_ipv4 = "0.0.0.0/0"
 }
 
@@ -95,7 +95,9 @@ resource "aws_iam_role_policy" "jenkins_ecr_push" {
   policy = data.aws_iam_policy_document.jenkins_ecr_push.json
 }
 
-data "aws_iam_policy_document" "jenkins_deploy_staging" {
+data "aws_iam_policy_document" "jenkins_deploy" {
+  for_each = local.deploy_environments
+
   # these read only calls do not support resource level permissions
   statement {
     sid       = "Lookups"
@@ -106,25 +108,25 @@ data "aws_iam_policy_document" "jenkins_deploy_staging" {
   statement {
     sid       = "RegisterApiRevisions"
     actions   = ["ecs:RegisterTaskDefinition"]
-    resources = ["${local.ecs_arn_prefix}:task-definition/${local.staging_name}-api:*"]
+    resources = ["${local.ecs_arn_prefix}:task-definition/${each.value}-api:*"]
   }
 
   statement {
     sid       = "RunMigrations"
     actions   = ["ecs:RunTask"]
-    resources = ["${local.ecs_arn_prefix}:task-definition/${local.staging_name}-api:*"]
+    resources = ["${local.ecs_arn_prefix}:task-definition/${each.value}-api:*"]
 
     condition {
       test     = "ArnEquals"
       variable = "ecs:cluster"
-      values   = ["${local.ecs_arn_prefix}:cluster/${local.staging_name}"]
+      values   = ["${local.ecs_arn_prefix}:cluster/${each.value}"]
     }
   }
 
   statement {
     sid       = "WatchMigrations"
     actions   = ["ecs:DescribeTasks"]
-    resources = ["${local.ecs_arn_prefix}:task/${local.staging_name}/*"]
+    resources = ["${local.ecs_arn_prefix}:task/${each.value}/*"]
   }
 
   # tags are copied onto new revisions and migration tasks, and can only be set while creating them
@@ -132,8 +134,8 @@ data "aws_iam_policy_document" "jenkins_deploy_staging" {
     sid     = "TagOnCreate"
     actions = ["ecs:TagResource"]
     resources = [
-      "${local.ecs_arn_prefix}:task-definition/${local.staging_name}-api:*",
-      "${local.ecs_arn_prefix}:task/${local.staging_name}/*",
+      "${local.ecs_arn_prefix}:task-definition/${each.value}-api:*",
+      "${local.ecs_arn_prefix}:task/${each.value}/*",
     ]
 
     condition {
@@ -146,16 +148,16 @@ data "aws_iam_policy_document" "jenkins_deploy_staging" {
   statement {
     sid       = "DeployApiService"
     actions   = ["ecs:DescribeServices", "ecs:UpdateService"]
-    resources = ["${local.ecs_arn_prefix}:service/${local.staging_name}/api"]
+    resources = ["${local.ecs_arn_prefix}:service/${each.value}/api"]
   }
 
-  # the staging roles use name prefixes, and staging recreates them every session
+  # the task roles use name prefixes, and every environment recreates them each session
   statement {
     sid     = "PassApiTaskRoles"
     actions = ["iam:PassRole"]
     resources = [
-      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.staging_name}-ecs-execution-*",
-      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.staging_name}-ecs-task-*",
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${each.value}-ecs-execution-*",
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${each.value}-ecs-task-*",
     ]
 
     condition {
@@ -166,10 +168,18 @@ data "aws_iam_policy_document" "jenkins_deploy_staging" {
   }
 }
 
-resource "aws_iam_role_policy" "jenkins_deploy_staging" {
-  name   = "deploy-api-staging"
+resource "aws_iam_role_policy" "jenkins_deploy" {
+  for_each = data.aws_iam_policy_document.jenkins_deploy
+
+  name   = "deploy-api-${each.key}"
   role   = aws_iam_role.jenkins.id
-  policy = data.aws_iam_policy_document.jenkins_deploy_staging.json
+  policy = each.value.json
+}
+
+# the staging policy existed before production was added, so terraform keeps it instead of recreating it
+moved {
+  from = aws_iam_role_policy.jenkins_deploy_staging
+  to   = aws_iam_role_policy.jenkins_deploy["staging"]
 }
 
 resource "aws_iam_instance_profile" "jenkins" {
