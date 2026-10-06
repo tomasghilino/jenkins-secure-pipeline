@@ -156,3 +156,7 @@ zap/          ZAP baseline rules
 docs/         Architecture, threat model, deployment guide and evidence
 Jenkinsfile   The pipeline
 ```
+
+## Status
+
+A practice project, last updated on October 6, 2026. It isn't maintained, so the pinned versions and image digests will fall behind and new vulnerabilities will show up over time; update them before reusing any of it. The AWS environments only existed during working sessions, so there is no live endpoint.
