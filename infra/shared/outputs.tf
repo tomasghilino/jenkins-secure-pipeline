@@ -1,3 +1,7 @@
 output "repository_url" {
   value = aws_ecr_repository.api.repository_url
 }
+
+output "alarm_topic_arn" {
+  value = aws_sns_topic.alarms.arn
+}
