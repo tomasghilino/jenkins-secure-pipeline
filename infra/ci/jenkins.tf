@@ -64,9 +64,33 @@ resource "aws_iam_role" "jenkins" {
   assume_role_policy = data.aws_iam_policy_document.jenkins_assume.json
 }
 
-resource "aws_iam_role_policy_attachment" "jenkins_ssm" {
-  role       = aws_iam_role.jenkins.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+# only what the ssm agent calls for run command and session manager; the aws managed policy
+# AmazonSSMManagedInstanceCore also lets the host read every parameter in the account
+data "aws_iam_policy_document" "jenkins_ssm_agent" {
+  statement {
+    sid       = "AgentHeartbeat"
+    actions   = ["ssm:UpdateInstanceInformation", "ssm:ListInstanceAssociations"]
+    resources = [aws_instance.jenkins.arn]
+  }
+
+  # agents from 3.3.40 carry run command and sessions over these channels, which take no resource; without
+  # ec2messages the agent logs access errors on the older endpoint for about a minute after it starts, then stops trying
+  statement {
+    sid = "MessageChannels"
+    actions = [
+      "ssmmessages:CreateControlChannel",
+      "ssmmessages:CreateDataChannel",
+      "ssmmessages:OpenControlChannel",
+      "ssmmessages:OpenDataChannel",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "jenkins_ssm_agent" {
+  name   = "ssm-agent"
+  role   = aws_iam_role.jenkins.id
+  policy = data.aws_iam_policy_document.jenkins_ssm_agent.json
 }
 
 data "aws_iam_policy_document" "jenkins_ecr_push" {
@@ -146,9 +170,22 @@ data "aws_iam_policy_document" "jenkins_deploy" {
   }
 
   statement {
-    sid       = "DeployApiService"
-    actions   = ["ecs:DescribeServices", "ecs:UpdateService"]
+    sid       = "WatchApiService"
+    actions   = ["ecs:DescribeServices"]
     resources = ["${local.ecs_arn_prefix}:service/${each.value}/api"]
+  }
+
+  # the service only moves to a revision of its own family, never to another environment's
+  statement {
+    sid       = "DeployApiService"
+    actions   = ["ecs:UpdateService"]
+    resources = ["${local.ecs_arn_prefix}:service/${each.value}/api"]
+
+    condition {
+      test     = "ArnLike"
+      variable = "ecs:task-definition"
+      values   = ["${local.ecs_arn_prefix}:task-definition/${each.value}-api:*"]
+    }
   }
 
   # the task roles use name prefixes, and every environment recreates them each session
