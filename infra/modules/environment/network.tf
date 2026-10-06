@@ -1,10 +1,10 @@
 resource "aws_vpc" "main" {
-  cidr_block           = "10.0.0.0/16"
+  cidr_block           = var.vpc_cidr
   enable_dns_support   = true
   enable_dns_hostnames = true
 
   tags = {
-    Name = "${local.name}-vpc"
+    Name = "${var.name}-vpc"
   }
 }
 
@@ -12,69 +12,70 @@ resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 
   tags = {
-    Name = "${local.name}-igw"
+    Name = "${var.name}-igw"
   }
 }
 
+# /24 blocks inside the /16: 0 and 1 public, 10 and 11 app, 20 and 21 database
 resource "aws_subnet" "public_a" {
   vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.0.0/24"
-  availability_zone       = "${var.region}a"
+  cidr_block              = cidrsubnet(var.vpc_cidr, 8, 0)
+  availability_zone       = "${local.region}a"
   map_public_ip_on_launch = false
 
   tags = {
-    Name = "${local.name}-public-a"
+    Name = "${var.name}-public-a"
   }
 }
 
 resource "aws_subnet" "public_b" {
   vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.1.0/24"
-  availability_zone       = "${var.region}b"
+  cidr_block              = cidrsubnet(var.vpc_cidr, 8, 1)
+  availability_zone       = "${local.region}b"
   map_public_ip_on_launch = false
 
   tags = {
-    Name = "${local.name}-public-b"
+    Name = "${var.name}-public-b"
   }
 }
 
 resource "aws_subnet" "app_a" {
   vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.10.0/24"
-  availability_zone = "${var.region}a"
+  cidr_block        = cidrsubnet(var.vpc_cidr, 8, 10)
+  availability_zone = "${local.region}a"
 
   tags = {
-    Name = "${local.name}-app-a"
+    Name = "${var.name}-app-a"
   }
 }
 
 resource "aws_subnet" "app_b" {
   vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.11.0/24"
-  availability_zone = "${var.region}b"
+  cidr_block        = cidrsubnet(var.vpc_cidr, 8, 11)
+  availability_zone = "${local.region}b"
 
   tags = {
-    Name = "${local.name}-app-b"
+    Name = "${var.name}-app-b"
   }
 }
 
 resource "aws_subnet" "db_a" {
   vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.20.0/24"
-  availability_zone = "${var.region}a"
+  cidr_block        = cidrsubnet(var.vpc_cidr, 8, 20)
+  availability_zone = "${local.region}a"
 
   tags = {
-    Name = "${local.name}-db-a"
+    Name = "${var.name}-db-a"
   }
 }
 
 resource "aws_subnet" "db_b" {
   vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.21.0/24"
-  availability_zone = "${var.region}b"
+  cidr_block        = cidrsubnet(var.vpc_cidr, 8, 21)
+  availability_zone = "${local.region}b"
 
   tags = {
-    Name = "${local.name}-db-b"
+    Name = "${var.name}-db-b"
   }
 }
 
@@ -82,7 +83,7 @@ resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
 
   tags = {
-    Name = "${local.name}-public-rt"
+    Name = "${var.name}-public-rt"
   }
 }
 
@@ -96,7 +97,7 @@ resource "aws_route_table" "app" {
   vpc_id = aws_vpc.main.id
 
   tags = {
-    Name = "${local.name}-app-rt"
+    Name = "${var.name}-app-rt"
   }
 }
 
@@ -104,7 +105,7 @@ resource "aws_route_table" "db" {
   vpc_id = aws_vpc.main.id
 
   tags = {
-    Name = "${local.name}-db-rt"
+    Name = "${var.name}-db-rt"
   }
 }
 

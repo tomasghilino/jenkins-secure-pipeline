@@ -4,8 +4,8 @@ data "aws_ecr_repository" "api" {
 }
 
 resource "aws_ecs_cluster" "main" {
-  #checkov:skip=CKV_AWS_65:container insights bills custom metrics, basic ecs metrics are enough while it only lives for a session
-  name = local.name
+  #checkov:skip=CKV_AWS_65:container insights bills custom metrics, basic ecs metrics are enough while an environment only lives for a session
+  name = var.name
 }
 
 data "aws_iam_policy_document" "ecs_tasks_assume" {
@@ -27,7 +27,7 @@ data "aws_iam_policy_document" "ecs_tasks_assume" {
 
 # used by ecs itself to start the task: pull the image, read the secret, write logs
 resource "aws_iam_role" "ecs_execution" {
-  name_prefix        = "${local.name}-ecs-execution-"
+  name_prefix        = "${var.name}-ecs-execution-"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
 }
 
@@ -65,12 +65,12 @@ resource "aws_iam_role_policy" "ecs_execution" {
 
 # used by the api code while it runs; it calls no aws api, so it gets no permissions
 resource "aws_iam_role" "ecs_task" {
-  name_prefix        = "${local.name}-ecs-task-"
+  name_prefix        = "${var.name}-ecs-task-"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
 }
 
 resource "aws_ecs_task_definition" "api" {
-  family                   = "${local.name}-api"
+  family                   = "${var.name}-api"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = 256
@@ -116,7 +116,7 @@ resource "aws_ecs_task_definition" "api" {
         logDriver = "awslogs"
         options = {
           awslogs-group         = aws_cloudwatch_log_group.app.name
-          awslogs-region        = var.region
+          awslogs-region        = local.region
           awslogs-stream-prefix = "api"
         }
       }
@@ -165,7 +165,7 @@ resource "aws_ecs_service" "api" {
 }
 
 resource "aws_cloudwatch_query_definition" "api_errors" {
-  name            = "${local.name}/api-errors"
+  name            = "${var.name}/api-errors"
   log_group_names = [aws_cloudwatch_log_group.app.name]
 
   query_string = <<-EOT

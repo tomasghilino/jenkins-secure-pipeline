@@ -1,16 +1,16 @@
 resource "aws_db_subnet_group" "main" {
-  name_prefix = "${local.name}-db-"
+  name_prefix = "${var.name}-db-"
   description = "Private database subnets"
   subnet_ids  = [aws_subnet.db_a.id, aws_subnet.db_b.id]
 
   tags = {
-    Name = "${local.name}-db-subnet-group"
+    Name = "${var.name}-db-subnet-group"
   }
 }
 
 # written out even though it matches the aws default, so the tls requirement is visible in code
 resource "aws_db_parameter_group" "main" {
-  name_prefix = "${local.name}-postgres17-"
+  name_prefix = "${var.name}-postgres17-"
   description = "PostgreSQL 17 settings"
   family      = "postgres17"
 
@@ -27,10 +27,10 @@ resource "aws_db_parameter_group" "main" {
 }
 
 resource "aws_db_instance" "main" {
-  #checkov:skip=CKV_AWS_157:single az staging database, multi az doubles the cost
-  #checkov:skip=CKV_AWS_293:staging is destroyed after every session
-  #checkov:skip=CKV_AWS_118:basic cloudwatch metrics are enough for a short lived staging database
-  #checkov:skip=CKV_AWS_353:basic cloudwatch metrics are enough for a short lived staging database
+  #checkov:skip=CKV_AWS_157:single az to keep the cost down, a long lived production would use multi az
+  #checkov:skip=CKV_AWS_293:environments are destroyed after every session, a long lived production would turn it on
+  #checkov:skip=CKV_AWS_118:basic cloudwatch metrics are enough for a database that only lives for a session
+  #checkov:skip=CKV_AWS_353:basic cloudwatch metrics are enough for a database that only lives for a session
   #checkov:skip=CKV_AWS_161:the app authenticates with the password from secrets manager
   identifier     = local.db_identifier
   engine         = "postgres"
@@ -61,7 +61,7 @@ resource "aws_db_instance" "main" {
 
   enabled_cloudwatch_logs_exports = ["postgresql"]
 
-  # staging is destroyed after every session and holds no data worth keeping
+  # environments are destroyed after every session, a long lived production would keep a final snapshot
   skip_final_snapshot = true
   deletion_protection = false
 

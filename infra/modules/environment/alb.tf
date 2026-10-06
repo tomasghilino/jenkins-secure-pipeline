@@ -1,9 +1,9 @@
 resource "aws_lb" "main" {
-  #checkov:skip=CKV_AWS_150:destroyed after every session like staging, a long lived production would turn it on
-  #checkov:skip=CKV_AWS_91:no request history while it only lives for a session, a long lived production would send access logs to s3
+  #checkov:skip=CKV_AWS_150:environments are destroyed after every session, a long lived production would turn it on
+  #checkov:skip=CKV_AWS_91:no request history while an environment only lives for a session, a long lived production would send access logs to s3
   #checkov:skip=CKV2_AWS_20:https needs an acm certificate and a domain
   #checkov:skip=CKV2_AWS_28:a waf web acl adds a monthly cost, production would add aws managed rules
-  name               = "${local.name}-alb"
+  name               = "${var.name}-alb"
   load_balancer_type = "application"
   internal           = false
   subnets            = [aws_subnet.public_a.id, aws_subnet.public_b.id]
@@ -15,7 +15,7 @@ resource "aws_lb" "main" {
 
 resource "aws_lb_target_group" "app" {
   #checkov:skip=CKV_AWS_378:traffic from the load balancer to the tasks stays inside the vpc
-  name        = "${local.name}-app"
+  name        = "${var.name}-app"
   vpc_id      = aws_vpc.main.id
   target_type = "ip"
   protocol    = "HTTP"

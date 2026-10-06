@@ -9,7 +9,8 @@ plugin "aws" {
   source  = "github.com/terraform-linters/tflint-ruleset-aws"
 }
 
-rule "aws_resource_missing_tags" {
+# every stack sets these as provider default tags; the per resource rule cannot see the provider of a module's caller
+rule "aws_provider_missing_default_tags" {
   enabled = true
   tags    = ["Project", "ManagedBy"]
 }

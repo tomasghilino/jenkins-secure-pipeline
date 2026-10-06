@@ -3,17 +3,17 @@ resource "aws_default_security_group" "main" {
   vpc_id = aws_vpc.main.id
 
   tags = {
-    Name = "${local.name}-default-sg"
+    Name = "${var.name}-default-sg"
   }
 }
 
 resource "aws_security_group" "alb" {
-  name_prefix = "${local.name}-alb-"
+  name_prefix = "${var.name}-alb-"
   description = "Public application load balancer"
   vpc_id      = aws_vpc.main.id
 
   tags = {
-    Name = "${local.name}-alb-sg"
+    Name = "${var.name}-alb-sg"
   }
 
   lifecycle {
@@ -41,12 +41,12 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_app" {
 }
 
 resource "aws_security_group" "app" {
-  name_prefix = "${local.name}-app-"
+  name_prefix = "${var.name}-app-"
   description = "API tasks"
   vpc_id      = aws_vpc.main.id
 
   tags = {
-    Name = "${local.name}-app-sg"
+    Name = "${var.name}-app-sg"
   }
 
   lifecycle {
@@ -92,12 +92,12 @@ resource "aws_vpc_security_group_egress_rule" "app_to_s3" {
 
 # no egress rules: the database never opens connections, and replies pass because security groups are stateful
 resource "aws_security_group" "db" {
-  name_prefix = "${local.name}-db-"
+  name_prefix = "${var.name}-db-"
   description = "PostgreSQL database"
   vpc_id      = aws_vpc.main.id
 
   tags = {
-    Name = "${local.name}-db-sg"
+    Name = "${var.name}-db-sg"
   }
 
   lifecycle {
@@ -116,12 +116,12 @@ resource "aws_vpc_security_group_ingress_rule" "db_from_app" {
 
 # no egress rules: the endpoints only answer requests
 resource "aws_security_group" "endpoints" {
-  name_prefix = "${local.name}-endpoints-"
+  name_prefix = "${var.name}-endpoints-"
   description = "Interface VPC endpoints"
   vpc_id      = aws_vpc.main.id
 
   tags = {
-    Name = "${local.name}-endpoints-sg"
+    Name = "${var.name}-endpoints-sg"
   }
 
   lifecycle {

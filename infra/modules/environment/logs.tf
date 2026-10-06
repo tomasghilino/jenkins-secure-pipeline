@@ -1,22 +1,22 @@
 resource "aws_cloudwatch_log_group" "app" {
   #checkov:skip=CKV_AWS_158:encrypted at rest with an aws owned key, a customer key per session would pile up keys pending deletion
-  #checkov:skip=CKV_AWS_338:staging logs are for debugging, production would keep a year
-  name              = "/ecs/${local.name}-api"
+  #checkov:skip=CKV_AWS_338:logs only matter while an environment is up, a long lived production would keep a year
+  name              = "/ecs/${var.name}-api"
   retention_in_days = local.log_retention_days
 }
 
 # rds writes to this exact name, so terraform creates it first to control retention and delete it on destroy
 resource "aws_cloudwatch_log_group" "db" {
   #checkov:skip=CKV_AWS_158:encrypted at rest with an aws owned key, a customer key per session would pile up keys pending deletion
-  #checkov:skip=CKV_AWS_338:staging logs are for debugging, production would keep a year
+  #checkov:skip=CKV_AWS_338:logs only matter while an environment is up, a long lived production would keep a year
   name              = "/aws/rds/instance/${local.db_identifier}/postgresql"
   retention_in_days = local.log_retention_days
 }
 
 resource "aws_cloudwatch_log_group" "flow_logs" {
   #checkov:skip=CKV_AWS_158:encrypted at rest with an aws owned key, a customer key per session would pile up keys pending deletion
-  #checkov:skip=CKV_AWS_338:staging logs are for debugging, production would keep a year
-  name              = "/vpc/${local.name}-flow-logs"
+  #checkov:skip=CKV_AWS_338:logs only matter while an environment is up, a long lived production would keep a year
+  name              = "/vpc/${var.name}-flow-logs"
   retention_in_days = local.log_retention_days
 }
 
@@ -30,13 +30,13 @@ resource "aws_flow_log" "main" {
   max_aggregation_interval = 60
 
   tags = {
-    Name = "${local.name}-flow-log"
+    Name = "${var.name}-flow-log"
   }
 }
 
 # saved in the logs insights console, so nobody has to remember the flow log field names
 resource "aws_cloudwatch_query_definition" "rejected_connections" {
-  name            = "${local.name}/rejected-connections"
+  name            = "${var.name}/rejected-connections"
   log_group_names = [aws_cloudwatch_log_group.flow_logs.name]
 
   query_string = <<-EOT
@@ -68,7 +68,7 @@ data "aws_iam_policy_document" "flow_logs_assume" {
 }
 
 resource "aws_iam_role" "flow_logs" {
-  name_prefix        = "${local.name}-flow-logs-"
+  name_prefix        = "${var.name}-flow-logs-"
   assume_role_policy = data.aws_iam_policy_document.flow_logs_assume.json
 }
 
