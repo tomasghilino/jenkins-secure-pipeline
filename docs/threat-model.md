@@ -69,4 +69,4 @@ flowchart LR
 - The Jenkins admin password is a file on the CI host, and Jenkins has no SSO.
 - Detection and response (CloudTrail analysis, GuardDuty, Security Hub) are outside this project.
 
-The [README](../README.md#production-improvements) lists what would change for a real production deployment.
+The [README](../README.md#what-would-change-in-production) lists what would change for a real production deployment.
