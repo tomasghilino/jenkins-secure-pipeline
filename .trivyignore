@@ -1,7 +1,2 @@
-# libssl3t64 3.5.7-1~deb13u2 in the distroless nodejs24-debian13 base image, fixed in 3.5.7-1~deb13u3
-# the newest distroless digest still ships the old package, so there is no image to upgrade to yet
-# not reachable: node bundles its own openssl 3.5.8 and does not link the system libssl,
-# node_modules has no native addons, the image has no shell, and the api uses neither quic nor dtls
-# remove both lines once distroless publishes an image with the fixed package
-CVE-2026-75804 exp:2026-10-31
-CVE-2026-84782 exp:2026-10-31
+# accepted findings, one id per line with an expiry such as exp:2026-12-31 so the gate fails again once it passes
+# every entry needs a comment above it saying why the finding is not reachable and when to remove it
