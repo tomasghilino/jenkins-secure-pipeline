@@ -2,32 +2,7 @@
 
 A CI/CD pipeline that takes a small NestJS API from a commit to AWS, with security checks along the way. Jenkins tests and scans every commit, deploys `dev` to a staging environment on ECS Fargate, runs OWASP ZAP against it, and waits for a person to approve before the same image goes to production. The infrastructure is Terraform, and every check below was triggered on purpose at least once.
 
-```mermaid
-flowchart LR
-    push([git push]) --> ci
-    subgraph ci [CI]
-        direction TB
-        gitleaks[Gitleaks] --> node[npm audit, lint,<br/>typecheck, unit tests]
-        node --> it[Integration tests]
-        it --> sonar[SonarQube gate]
-        sonar --> tf[Terraform fmt, validate,<br/>TFLint, Checkov]
-        tf --> build[Docker build]
-        build --> trivy[Trivy scans and SBOM]
-    end
-    ci -->|dev only| ecr[(ECR, tagged with<br/>the commit SHA)]
-    ecr --> staging
-    subgraph staging [Staging]
-        direction TB
-        deploy1[Migrate and deploy] --> smoke[Smoke test]
-        smoke --> zap[OWASP ZAP baseline]
-    end
-    staging --> approval{Manual<br/>approval}
-    approval -->|approved| production
-    subgraph production [Production]
-        direction TB
-        deploy2[Migrate and deploy<br/>the same image] --> verify[Verify]
-    end
-```
+![Architecture overview: Jenkins on EC2 in its own VPC, the staging and production VPCs with the load balancer, ECS Fargate and RDS, and the AWS services they use](docs/images/architecture-overview.jpg)
 
 ## Stack
 
@@ -37,6 +12,13 @@ flowchart LR
 - Infrastructure: Terraform with remote state in S3, on AWS VPC, ALB, ECS Fargate, RDS, ECR, Secrets Manager, CloudWatch and SNS
 
 ## Architecture
+
+Staging and production are identical VPCs across two availability zones. The load balancer is the only public part. The ECS tasks and the database sit in private subnets with no route to the internet, and the tasks reach ECR, CloudWatch Logs and Secrets Manager through VPC endpoints instead of a NAT gateway. RDS generates and rotates the database password, and ECS injects it when a task starts, so it never appears in code or in Terraform state.
+
+Jenkins and SonarQube run on an EC2 host with no inbound ports. They're reached through SSM port forwarding, and Jenkins calls AWS with the instance role instead of access keys. [docs/architecture.md](docs/architecture.md) has the details.
+
+<details>
+<summary>The same architecture as a Mermaid diagram</summary>
 
 ```mermaid
 flowchart LR
@@ -75,11 +57,36 @@ flowchart LR
     jenkins -->|smoke test, ZAP| alb
 ```
 
-Staging and production are identical VPCs across two availability zones. The load balancer is the only public part. The ECS tasks and the database sit in private subnets with no route to the internet, and the tasks reach ECR, CloudWatch Logs and Secrets Manager through VPC endpoints instead of a NAT gateway. RDS generates and rotates the database password, and ECS injects it when a task starts, so it never appears in code or in Terraform state.
-
-Jenkins and SonarQube run on an EC2 host with no inbound ports. They're reached through SSM port forwarding, and Jenkins calls AWS with the instance role instead of access keys. [docs/architecture.md](docs/architecture.md) has the details.
+</details>
 
 ## How a change ships
+
+```mermaid
+flowchart LR
+    push([git push]) --> ci
+    subgraph ci [CI]
+        direction TB
+        gitleaks[Gitleaks] --> node[npm audit, lint,<br/>typecheck, unit tests]
+        node --> it[Integration tests]
+        it --> sonar[SonarQube gate]
+        sonar --> tf[Terraform fmt, validate,<br/>TFLint, Checkov]
+        tf --> build[Docker build]
+        build --> trivy[Trivy scans and SBOM]
+    end
+    ci -->|dev only| ecr[(ECR, tagged with<br/>the commit SHA)]
+    ecr --> staging
+    subgraph staging [Staging]
+        direction TB
+        deploy1[Migrate and deploy] --> smoke[Smoke test]
+        smoke --> zap[OWASP ZAP baseline]
+    end
+    staging --> approval{Manual<br/>approval}
+    approval -->|approved| production
+    subgraph production [Production]
+        direction TB
+        deploy2[Migrate and deploy<br/>the same image] --> verify[Verify]
+    end
+```
 
 1. Every branch gets secret scanning, the dependency audit, lint, type checks, unit and integration tests, the Terraform checks and an image build scanned by Trivy. On `dev`, SonarQube's quality gate runs too.
 2. The `dev` image is pushed to ECR, tagged with the commit SHA. Tags can't be overwritten.
