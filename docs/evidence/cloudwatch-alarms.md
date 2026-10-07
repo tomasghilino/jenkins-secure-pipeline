@@ -1,10 +1,15 @@
 # CloudWatch alarms and logs under failure
 
-Each environment has two alarms that email a subscribed address through the shared SNS topic `jsp-alarms`: `<env>-http-5xx` (5 or more 5xx responses in a minute, from the API or from the load balancer) and `<env>-no-healthy-targets` (no task passing the health check for two minutes). Three controlled failures on staging on 2026-10-06 tested them, and each one was undone right after: demo revisions deregistered and deleted, desired count restored.
+Each environment has two alarms, and both send an email through the shared SNS topic `jsp-alarms`:
+
+- `<env>-http-5xx` goes off when there are 5 or more 5xx responses in a minute, whether they come from the API or from the load balancer.
+- `<env>-no-healthy-targets` goes off when no task has passed the health check for two minutes.
+
+To test them I broke staging in three different ways on October 6, 2026, and undid each one right after (demo revisions deregistered and deleted, desired count restored).
 
 ## 1. Healthy for the load balancer, broken for users
 
-A revision with a wrong database name. `/health` does not touch the database, so ECS and the circuit breaker considered the deployment healthy.
+This is the sneaky one. I deployed a revision with the wrong database name. `/health` doesn't touch the database, so the load balancer and the ECS circuit breaker thought everything was fine, while every request that needed the database returned a 500.
 
 ```text
 15:39:50  registered jsp-staging-api:22 with PGDATABASE=does-not-exist
@@ -16,22 +21,28 @@ A revision with a wrong database name. `/health` does not touch the database, so
 15:48:20  jsp-staging-http-5xx      ALARM -> OK   (email sent), /users -> 200
 ```
 
-The API logs, queried with Logs Insights, show the cause and every failed request. The client only received a generic 500 body.
+The alarm fired less than three minutes after the errors started, and went back to OK once the previous revision was back. A rollback can't catch this case, because the deployment looks healthy, so this is the case the 5xx alarm is for.
+
+The client only got a generic 500 body with no details. The real cause was in the API logs, which I found with Logs Insights:
 
 ```text
 {"level":"error","pid":1,"timestamp":1791301432457,"message":"error: database \"does-not-exist\" does not exist\n    at /app/node_modules/pg-pool/index.js:45:11 ..."}
 {"level":"error","pid":1,"timestamp":1791301432457,"message":{"method":"GET","path":"/users","status":500,"durationMs":19,"traceId":"Root=1-6ac51738-744a1540223785b313ea2089"},"context":"HTTP"}
 ```
 
-A normal request looks like this:
+For comparison, a normal request looks like this:
 
 ```text
 {"level":"log","pid":1,"timestamp":1791306781643,"message":{"method":"GET","path":"/users","status":200,"durationMs":8,"traceId":"Root=1-6ac52c1d-31ed06ae7dad1a240d0615bc"},"context":"HTTP"}
 ```
 
-## 2. A bad deployment, and why an unhealthy-target alarm was dropped
+Every log line is JSON, so you can filter by status, path or duration. The `traceId` is the `X-Amzn-Trace-Id` header the load balancer adds to each request, which lets you follow one request across the load balancer and the API logs.
 
-A revision listening on port 3001 while the load balancer checks 3000. The circuit breaker rolled it back and the old task kept serving the whole time, but the first design of the second alarm, `UnHealthyHostCount >= 1`, never fired. ECS stops a task 34 ms after the load balancer marks it unhealthy, and the per-minute sample never sees it.
+## 2. A bad deployment, and an alarm that didn't work
+
+Same trick as the [rollback demo](ecs-rollback.md): a revision listening on port 3001 while the load balancer checks 3000. The circuit breaker rolled it back and the old task kept serving the whole time.
+
+The problem was my first design for the second alarm, `UnHealthyHostCount >= 1`, meaning "alert if any task is unhealthy". It never fired. ECS stops an unhealthy task 34 milliseconds after the load balancer marks it, and a metric that is sampled once per minute never sees it:
 
 ```text
 16:03:17.987  (task 3825...) (port 3000) is unhealthy in target-group jsp-staging-app
@@ -40,9 +51,11 @@ A revision listening on port 3001 while the load balancer checks 3000. The circu
 UnHealthyHostCount, maximum per minute: 0 for every minute of the demo
 ```
 
-The alarm was replaced by `HealthyHostCount < 1` for two minutes, which is what users notice. A failed rollout is already reported by the red Jenkins build and undone by the circuit breaker.
+So I replaced it with `HealthyHostCount < 1` for two minutes, which is what users actually care about: is anything serving? A failed rollout is covered anyway, because the Jenkins build goes red and the circuit breaker undoes it.
 
-## 3. Outage: the service runs no task
+## 3. Outage: no task running at all
+
+I set the service's desired count to 0, so there was nothing behind the load balancer:
 
 ```text
 16:13:12  desired/running 0/0
@@ -54,4 +67,6 @@ The alarm was replaced by `HealthyHostCount < 1` for two minutes, which is what 
 16:25:33  jsp-staging-no-healthy-targets    ALARM -> OK   (email sent)
 ```
 
-With traffic, the 5xx alarm caught the outage in about 3 minutes. With no target registered, the load balancer stops publishing `HealthyHostCount`. The alarm treats missing data as breaching, but CloudWatch first waits for late data, so it fired about 9 minutes after the last datapoint. Filling the gap with zeros (`FILL`) would react sooner, but a datapoint that arrives late would then raise a false alarm. The delay is accepted: the 5xx alarm is the fast signal, and the healthy-target alarm is the backstop when nobody is calling the API.
+With requests coming in, the 5xx alarm caught the outage in about 3 minutes. The healthy-targets alarm was much slower, and here's why. With no target registered, the load balancer stops publishing `HealthyHostCount` at all. The alarm treats missing data as a problem, but CloudWatch first waits a while in case the data is only late, so it fired about 9 minutes after the last datapoint.
+
+I could make it react sooner by treating missing data as zero (`FILL`), but then any datapoint that arrives late would raise a false alarm. I accepted the delay: the 5xx alarm is the fast signal, and the healthy-targets alarm is the backup for when nobody is calling the API.

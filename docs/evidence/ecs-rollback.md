@@ -1,16 +1,16 @@
 # ECS rolls back a deployment that never becomes healthy
 
-Staging, 2026-10-05. A throwaway Jenkins job, never committed, ran the real deploy steps of the Jenkinsfile with one planted misconfiguration.
+Short version: I shipped a release to staging that could never pass its health check. ECS noticed, gave up after three tries and put the previous version back by itself. The old version kept answering requests the whole time, and the pipeline stopped before the bad release got anywhere near production.
 
-**What failed.** Revision `jsp-staging-api:16` used the same image as the healthy revision 15 but set `PORT=3001`, so the API listened on 3001 while the load balancer health check targets port 3000.
+## The setup
 
-**How ECS detected it.** The ALB health check (`GET /health` every 15 s, unhealthy after 3 failures) marked each new task `unhealthy` with reason `Target.FailedHealthChecks`. ECS stopped every unhealthy task and launched another one. After the third consecutive failure, the deployment circuit breaker marked the deployment `FAILED`.
+Every ECS deploy registers a new revision of the task definition, which is a numbered copy of the container settings (image, environment variables, CPU and memory). Staging was running revision 15, healthy.
 
-**What the rollback did.** ECS started a rollback deployment to the last deployment in `COMPLETED` state (revision 15) and drained the failed one. Revision 15 never stopped serving, because a rolling deployment keeps the old task until a new one is healthy.
+I registered revision 16 with the same image and one wrong setting, `PORT=3001`. The API started fine, but on port 3001, while the load balancer checks `GET /health` on port 3000. Seen from the load balancer, the new task was dead. The deploy ran from a throwaway Jenkins job that used the real deploy steps of the Jenkinsfile, so nothing of the demo was committed.
 
-**How the healthy version was restored.** About 8 minutes after the bad deployment started, the service ran only revision 15 again, in `COMPLETED` state. Jenkins saw that the service did not run the revision it had deployed, failed the build at `Roll out service`, printed the ECS events and skipped every later stage, so this image could never reach the production approval. `/health` answered 200 in all 64 checks taken during the demo.
+## What happened
 
-Timeline from an observer polling every 10 seconds (local time, UTC-3):
+ECS starts the new task next to the old one and only removes the old one once the new one is healthy. The load balancer calls `/health` every 15 seconds and marks a task unhealthy after 3 failures in a row. This is what an observer polling every 10 seconds saw (local time, UTC-3):
 
 | Time | ECS deployments | Load balancer target of the new task |
 |---|---|---|
@@ -25,7 +25,15 @@ Timeline from an observer polling every 10 seconds (local time, UTC-3):
 | 18:40:34 | rev 16 FAILED, rollback to rev 15 IN_PROGRESS | |
 | 18:41:19 | rev 15 COMPLETED, the only deployment left | |
 
-Jenkins console excerpt, ECS events newest first (UTC):
+Each new task failed its checks, so ECS stopped it and tried another one. After the third failure the deployment circuit breaker tripped. It works like the fuse in a house: instead of retrying forever, it marks the deployment `FAILED` and goes back to the last deployment that completed, revision 15.
+
+The whole thing took about 8 minutes. I called `/health` 64 times during the demo and got a 200 every time, so a user would not have noticed anything.
+
+## What Jenkins did
+
+After a deploy, Jenkins checks which revision the service actually ended up running. It had deployed 16 and the service was back on 15, so the build failed at `Roll out service`, printed the ECS events and skipped every later stage. That image could never reach the production approval.
+
+ECS events from the Jenkins console, newest first (UTC):
 
 ```text
 the circuit breaker rolled the service back to jsp-staging-api:15, jsp-staging-api:16 never became healthy
@@ -41,11 +49,11 @@ Stage "Smoke test" skipped due to earlier failure(s)
 Finished: FAILURE
 ```
 
-ECS words the circuit breaker failure as "tasks failed to start" both for tasks that never start and for tasks that fail their health checks.
+One confusing detail: ECS says "tasks failed to start" even when the tasks did start and only failed their health checks. It uses the same message for both cases.
 
-## Second occurrence: a real pipeline build (dev #16)
+## Then it happened again, for real
 
-The deploy step copies the latest active revision of the task definition family and swaps only the image. The demo left its planted revision 16 as the latest one, so the next real build registered revision 17 with the new image but the same `PORT=3001`. The circuit breaker rolled staging back again, and the pipeline stopped before the production approval:
+This part wasn't planned. Jenkins builds each new revision by copying the latest one and swapping only the image. After the demo, the latest revision was still the broken 16, so the next real build (dev #16) registered revision 17 with the new image and the same `PORT=3001`. The circuit breaker rolled staging back again:
 
 ```text
 the circuit breaker rolled the service back to jsp-staging-api:15, jsp-staging-api:17 never became healthy
@@ -59,4 +67,6 @@ Stage "Verify production" skipped due to earlier failure(s)
 Finished: FAILURE
 ```
 
-Production stayed on `jsp-production-api:2`. Deregistering revisions 16 and 17 made revision 15 the latest active one again, and a new build of the same commit deployed normally. Lesson: a revision changed outside Terraform must be deregistered, because the pipeline builds every new revision on top of the latest one.
+Production was never touched and stayed on `jsp-production-api:2`. I deregistered revisions 16 and 17, which made 15 the latest one again, and a new build of the same commit deployed normally.
+
+The lesson: if you change a task definition by hand, outside Terraform, clean it up afterwards, because the pipeline builds on top of whatever revision is the latest.

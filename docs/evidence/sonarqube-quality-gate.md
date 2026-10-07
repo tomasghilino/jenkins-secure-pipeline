@@ -1,8 +1,10 @@
 # SonarQube quality gate
 
-SonarQube Community Build analyzes `app/src` on every `dev` build, and the `Quality gate` stage waits for the result through a webhook and fails the build when the gate fails. The gate is the built-in Sonar way, which judges new code: no new issues, at least 80% coverage and at most 3% duplication. The coverage and duplication conditions are ignored while there are fewer than 20 new lines.
+SonarQube reads the code in `app/src` on every `dev` build and decides whether it passes a quality gate. Jenkins waits for that answer, which SonarQube sends back through a webhook, and fails the build if the gate fails.
 
-State of the project on 2026-10-06, from the SonarQube web API:
+I use the built-in gate, Sonar way. It only judges new code, which is how most teams use it: you don't have to fix every old problem before shipping, but a new change can't make things worse. The conditions are no new issues, at least 80% test coverage and at most 3% duplicated lines. Coverage and duplication are skipped when a change has fewer than 20 new lines, so a one-line fix isn't blocked by a percentage.
+
+Here's the project on October 6, 2026, from the SonarQube web API:
 
 ```text
 quality gate: OK
@@ -21,12 +23,14 @@ duplicated lines      0.0 %
 lines of code         244
 ```
 
-What each number means:
+What each number means, in plain words:
 
-- **Bugs**: code that is likely wrong at runtime.
-- **Vulnerabilities**: code that is exploitable as written.
-- **Security hotspots**: security-sensitive code that a person has to review; it is not a confirmed problem.
-- **Code smells**: maintainability issues.
-- **Coverage**: lines executed by tests. Both suites produce LCOV reports, and SonarQube combines them.
+- Bugs are code that will probably do the wrong thing when it runs.
+- Vulnerabilities are code that someone could exploit as it is written.
+- Security hotspots are places that touch something sensitive and need a person to look at them. They aren't confirmed problems.
+- Code smells don't break anything today, but they make the code harder to maintain.
+- Coverage is the share of lines the tests actually run. The unit and integration tests each produce a report, and SonarQube merges them.
 
-The gate failed once on purpose during the project: a value generated with `Math.random()` raised rule S2245 (pseudorandom number generator where unpredictability matters), the build stopped, and the fix used `randomUUID()` from `node:crypto`.
+## The time it failed
+
+I broke the gate on purpose once. A value was generated with `Math.random()`, and SonarQube raised rule S2245: `Math.random()` is predictable, so it shouldn't be used where a value needs to be hard to guess. The build stopped at the quality gate. The fix was `randomUUID()` from `node:crypto`, which uses a cryptographically secure generator.

@@ -1,6 +1,8 @@
 # Gitleaks blocks a committed token
 
-The `Secret scan` stage runs Gitleaks on the commit being built, before anything is installed or built. To show the gate without putting a credential in this repository's history, the same pinned image and command ran against a throwaway repository whose second commit adds a GitHub personal access token. The token was random characters with the `ghp_` prefix and was never valid.
+The first real stage of the pipeline, `Secret scan`, runs Gitleaks before anything gets installed or built. It reads the whole history up to the commit being built, not only the latest change. That matters because deleting a secret in a later commit doesn't remove it from Git: anyone who clones the repository can still find it.
+
+I didn't want a credential in this repository's history, not even a fake one. So for this demo I ran the exact same pinned image and command against a throwaway repository whose second commit adds a GitHub personal access token. The token was random characters with the `ghp_` prefix and was never valid.
 
 ```text
 $ docker run --rm -v "$PWD:/repo" -w /repo --network none --entrypoint= \
@@ -22,4 +24,6 @@ Fingerprint: <sha>:config.ts:github-pat:3
 exit code 1
 ```
 
-In the pipeline that exit code fails the build, so no later stage runs. `--redact` keeps the secret out of the Jenkins log, and `--network none` keeps the scanner offline. The same check ran in the pipeline during the project on a throwaway branch with fake AWS keys, which was deleted afterwards.
+Gitleaks exits with code 1, and in Jenkins that fails the build, so nothing after it runs. Two flags are worth pointing out. `--redact` hides the secret in the output, so the token doesn't end up copied into the Jenkins log, and `--network none` runs the scanner with no network access at all.
+
+During the project I also ran the same check inside the real pipeline, on a throwaway branch with fake AWS keys, and deleted the branch afterwards.

@@ -1,6 +1,10 @@
 # Production receives the image staging tested
 
-Dev build #15, commit `6b1890b`, 2026-10-05. One build validated the code, deployed staging, passed the smoke test and ZAP, waited for a person, and then deployed the same image to production.
+Dev build #15, commit `6b1890b`, October 5, 2026.
+
+The point of staging is to test the exact thing that will go to production. If the pipeline rebuilt the image after the approval, production would get a new artifact nobody had tested, even with the same code. So this pipeline builds the image once, and production gets that same image after a person approves it.
+
+In this build a single run validated the code, deployed staging, passed the smoke test and ZAP, waited for me, and then deployed to production:
 
 ```text
 Deploy this image to production?
@@ -12,7 +16,7 @@ registered jsp-production-api:2 with <registry>/jsp-api:6b1890b4dcfb...
 Finished: SUCCESS
 ```
 
-The digests of the running tasks (`aws ecs describe-tasks`) match each other and the ECR tag (`aws ecr describe-images`), so production runs the exact bytes staging tested:
+To prove it was the same image, I compared digests. A digest is a hash of the image's content, so changing a single byte gives a different digest. The running tasks (`aws ecs describe-tasks`) and the ECR tag (`aws ecr describe-images`) all show the same one:
 
 | Where | Revision | Image digest |
 |---|---|---|
@@ -20,4 +24,4 @@ The digests of the running tasks (`aws ecs describe-tasks`) match each other and
 | production | jsp-production-api:2 | sha256:4988f943015fd30300070212456b2fba324b20706d003d4469a787122169acb5 |
 | ECR tag `6b1890b` | | sha256:4988f943015fd30300070212456b2fba324b20706d003d4469a787122169acb5 |
 
-An approval that is aborted or left unanswered for 30 minutes ends the build, and production keeps what it was running.
+If the approval is aborted, or nobody answers for 30 minutes, the build ends and production keeps running what it had.
