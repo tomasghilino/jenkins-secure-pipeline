@@ -13,7 +13,7 @@ A CI/CD pipeline that takes a small NestJS API from a commit to AWS, with securi
 
 ## Architecture
 
-Staging and production are identical VPCs across two availability zones. The load balancer is the only public part. The ECS tasks and the database sit in private subnets with no route to the internet, and the tasks reach ECR, CloudWatch Logs and Secrets Manager through VPC endpoints instead of a NAT gateway. RDS generates and rotates the database password, and ECS injects it when a task starts, so it never appears in code or in Terraform state.
+Staging and production are identical VPCs across two availability zones. The load balancer is the only public part. The ECS tasks and the database sit in private subnets with no route to the internet, and the tasks reach ECR, S3 (where ECR keeps image layers), CloudWatch Logs and Secrets Manager through VPC endpoints instead of a NAT gateway. RDS generates and rotates the database password, and ECS injects it when a task starts, so it never appears in code or in Terraform state.
 
 Jenkins and SonarQube run on an EC2 host with no inbound ports. They're reached through SSM port forwarding, and Jenkins calls AWS with the instance role instead of access keys. [docs/architecture.md](docs/architecture.md) has the details.
 
@@ -41,6 +41,7 @@ flowchart LR
     end
     subgraph aws [AWS services]
         ecr[(ECR)]
+        s3[(S3)]
         secrets[Secrets Manager]
         cloudwatch[CloudWatch]
         sns[SNS email]
@@ -49,6 +50,7 @@ flowchart LR
     service -->|5432 TLS| rds
     service --> endpoints
     endpoints --> ecr
+    endpoints --> s3
     endpoints --> secrets
     endpoints --> cloudwatch
     cloudwatch -->|alarms| sns
@@ -94,7 +96,7 @@ flowchart LR
 4. A smoke test and a ZAP baseline scan run against staging.
 5. The build waits for approval. If an admin approves within 30 minutes, production gets the same image and is verified; otherwise nothing changes.
 
-Any failing check stops the build, and it takes about 9 minutes to reach the approval ([stage timings](docs/evidence/pipeline-run.md)). If new tasks fail their health checks, the ECS circuit breaker rolls the service back, and CloudWatch alarms send an email when users get 5xx errors or no task is healthy.
+Any failing check stops the build, and it takes about 10 minutes to reach the approval ([stage timings](docs/evidence/pipeline-run.md)). If new tasks fail their health checks, the ECS circuit breaker rolls the service back, and CloudWatch alarms send an email when users get 5xx errors or no task is healthy.
 
 ## Failures tested on purpose
 
@@ -159,4 +161,4 @@ Jenkinsfile   The pipeline
 
 ## Status
 
-A practice project, last updated on October 6, 2026. It isn't maintained, so the pinned versions and image digests will fall behind and new vulnerabilities will show up over time; update them before reusing any of it. The AWS environments only existed during working sessions, so there is no live endpoint.
+A practice project, last updated on October 7, 2026. It isn't maintained, so the pinned versions and image digests will fall behind and new vulnerabilities will show up over time; update them before reusing any of it. The AWS environments only existed during working sessions, so there is no live endpoint.
