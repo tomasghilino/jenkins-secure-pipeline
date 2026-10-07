@@ -162,3 +162,5 @@ Jenkinsfile   The pipeline
 ## Status
 
 A practice project, last updated on October 7, 2026. It isn't maintained, so the pinned versions and image digests will fall behind and new vulnerabilities will show up over time; update them before reusing any of it. The AWS environments only existed during working sessions, so there is no live endpoint.
+
+AI assistants sped up the writing, the same way they do in my day-to-day work. The decisions and trade-offs were mine, and I can explain what any part of this does and why.
